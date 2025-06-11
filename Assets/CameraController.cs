@@ -1,5 +1,5 @@
 using UnityEngine;
-//VivaEjgjfhgf
+//Viva
 //Handles camera panning with WASD keys
 public class CameraController : MonoBehaviour
 {
