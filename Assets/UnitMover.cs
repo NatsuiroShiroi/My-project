@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
-
+//
 [RequireComponent(typeof(Rigidbody2D), typeof(Collider2D))]
 public class UnitMover : MonoBehaviour
 {
@@ -99,7 +99,7 @@ public class UnitMover : MonoBehaviour
         // 5) If occupied, wait
         if (occupied.Contains(nextCell))
             return;
-
+        
         // 6) Otherwise reserve & move
         occupied.Add(nextCell);
         targetCenter = tilemap.GetCellCenterWorld(nextCell);
