@@ -1,5 +1,5 @@
 using UnityEngine;
-//Vivawhere git
+//Viva
 //Handles camera panning with WASD keys
 public class CameraController : MonoBehaviour
 {
