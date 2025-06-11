@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
-
+//
 public class FlowField
 {
     private Vector2[,] directions;
@@ -23,7 +23,7 @@ public class FlowField
         height = cb.size.y;
         origin = tilemap.CellToWorld(cb.min);
         cellSize = tilemap.cellSize.x;
-
+        
         // init distances
         var dist = new float[width, height];
         for (int x = 0; x < width; x++)
