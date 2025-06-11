@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
-
+//
 // Allows click-and-drag selection of units, drawing selection rectangles and borders
 
 [RequireComponent(typeof(Collider2D))]
@@ -128,7 +128,7 @@ public class UnitSelector : MonoBehaviour
                 selectedUnitsGlobal.Clear();
                 dragCleared = true;
             }
-
+            
             bool newlySelected;
             if (!dragSelect)
             {
