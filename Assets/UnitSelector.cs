@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
-//
+
 // Allows click-and-drag selection of units, drawing selection rectangles and borders
 
 [RequireComponent(typeof(Collider2D))]
