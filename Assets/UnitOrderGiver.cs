@@ -7,12 +7,7 @@ public class UnitOrderGiver : MonoBehaviour
 {
     private Tilemap tilemap;
     private SpriteRenderer groundSprite;
-    private static readonly Vector2Int[] neighborDirs = {
-        new Vector2Int(1,0), new Vector2Int(-1,0),
-        new Vector2Int(0,1), new Vector2Int(0,-1),
-        new Vector2Int(1,1), new Vector2Int(1,-1),
-        new Vector2Int(-1,1),new Vector2Int(-1,-1)
-    };
+    private static readonly Vector2Int[] neighborDirs = FlowField.Dirs;
 
     void Awake()
     {
@@ -27,7 +22,7 @@ public class UnitOrderGiver : MonoBehaviour
         if (Input.GetMouseButtonDown(1))
         {
             var wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-            wp.z = 0;
+            wp.z = 0f;
             IssueMoveOrder(wp);
         }
     }
@@ -37,58 +32,56 @@ public class UnitOrderGiver : MonoBehaviour
         if (tilemap == null || groundSprite == null) return;
 
         UnitMover.ClearReservations();
-
         var sels = UnitSelector.GetSelectedUnits();
         var movers = new List<UnitMover>();
         foreach (var s in sels)
-            if (s.TryGetComponent<UnitMover>(out var mv))
-                movers.Add(mv);
-        if (movers.Count == 0)
-            movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
+            if (s.TryGetComponent<UnitMover>(out var mv)) movers.Add(mv);
+        if (movers.Count == 0) movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
         if (movers.Count == 0) return;
 
-        var b = groundSprite.bounds;
-        var minC = tilemap.WorldToCell(b.min);
-        var maxC = tilemap.WorldToCell(b.max);
-        int minX = minC.x, minY = minC.y, maxX = maxC.x, maxY = maxC.y;
+        // ground cell bounds (inset half-cell)
+        var bs = groundSprite.bounds;
+        var inset = tilemap.cellSize * 0.5f;
+        var minC = tilemap.WorldToCell(bs.min + inset);
+        var maxC = tilemap.WorldToCell(bs.max - inset);
 
-        var click3 = tilemap.WorldToCell(worldDest);
+        // clamp click
+        var c3 = tilemap.WorldToCell(worldDest);
         var baseGoal = new Vector2Int(
-            Mathf.Clamp(click3.x, minX, maxX),
-            Mathf.Clamp(click3.y, minY, maxY)
+            Mathf.Clamp(c3.x, minC.x, maxC.x),
+            Mathf.Clamp(c3.y, minC.y, maxC.y)
         );
 
-        // BFS to gather nearest free cells
-        var assigned = new HashSet<Vector2Int>();
-        var queue = new Queue<Vector2Int>();
+        // BFS to collect nearest free cells
+        var assigned = new List<Vector2Int>();
         var seen = new HashSet<Vector2Int>();
-        var goals = new List<Vector2Int>();
-        queue.Enqueue(baseGoal); seen.Add(baseGoal);
-        while (goals.Count < movers.Count && queue.Count > 0)
+        var queue = new Queue<Vector2Int>();
+        queue.Enqueue(baseGoal);
+        seen.Add(baseGoal);
+
+        while (assigned.Count < movers.Count && queue.Count > 0)
         {
             var cur = queue.Dequeue();
-            // skip terrain
+            // skip if terrain
             var ctr = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
             if (Physics2D.OverlapBox(ctr, tilemap.cellSize * 0.9f, 0f) == null)
-            {
-                goals.Add(cur);
                 assigned.Add(cur);
-            }
-            // enqueue neighbors
+
             foreach (var d in neighborDirs)
             {
                 var nxt = cur + d;
-                if (nxt.x < minX || nxt.x > maxX || nxt.y < minY || nxt.y > maxY) continue;
+                if (nxt.x < minC.x || nxt.x > maxC.x || nxt.y < minC.y || nxt.y > maxC.y) continue;
                 if (seen.Add(nxt)) queue.Enqueue(nxt);
             }
         }
 
-        int width = maxX - minX + 1, height = maxY - minY + 1;
-        for (int i = 0; i < goals.Count; i++)
+        // assign each unit its goal & flow field
+        int width = maxC.x - minC.x + 1, height = maxC.y - minC.y + 1;
+        for (int i = 0; i < assigned.Count; i++)
         {
             var unit = movers[i];
-            var goal = goals[i];
-            var field = new FlowField(minX, minY, width, height, tilemap);
+            var goal = assigned[i];
+            var field = new FlowField(minC.x, minC.y, width, height, tilemap);
             field.Generate(goal);
             unit.SetFlowField(field, goal);
         }
