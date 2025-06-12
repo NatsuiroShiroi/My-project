@@ -1,11 +1,11 @@
-﻿using System.Collections.Generic;
+﻿// Assets/FlowField.cs
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
 public class FlowField
 {
-    private int width, height;
-    private Vector2Int goal;
+    private readonly int width, height;
     private float[,] cost;
     private Vector2[,] flowDir;
 
@@ -17,70 +17,80 @@ public class FlowField
         flowDir = new Vector2[width, height];
     }
 
+    /// <summary>
+    /// Builds a Dijkstra flood-fill from 'goal' over the Tilemap,
+    /// then computes, for each cell, the unit vector pointing to its lowest-cost neighbor.
+    /// </summary>
     public void Generate(Vector2Int goal, Tilemap tilemap)
     {
-        this.goal = goal;
         var queue = new Queue<Vector2Int>();
-
-        // Build walkable map from tilemap: empty = walkable, tile = obstacle
         bool[,] walkable = new bool[width, height];
+
+        // 1) Build walkable mask from your obstacle Tilemap
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
-            {
                 walkable[x, y] = !tilemap.HasTile(new Vector3Int(x, y, 0));
-            }
 
+        // 2) Init all costs to ∞
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 cost[x, y] = float.MaxValue;
 
-        cost[goal.x, goal.y] = 0;
+        // 3) Flood‐fill from the goal
+        cost[goal.x, goal.y] = 0f;
         queue.Enqueue(goal);
 
-        Vector2Int[] directions = {
+        var dirs = new Vector2Int[] {
             new Vector2Int(1,0), new Vector2Int(-1,0),
             new Vector2Int(0,1), new Vector2Int(0,-1)
         };
 
         while (queue.Count > 0)
         {
-            var current = queue.Dequeue();
-            float currentCost = cost[current.x, current.y];
+            var cur = queue.Dequeue();
+            float curCost = cost[cur.x, cur.y];
 
-            foreach (var dir in directions)
+            foreach (var d in dirs)
             {
-                var next = current + dir;
-                if (next.x < 0 || next.y < 0 || next.x >= width || next.y >= height) continue;
-                if (!walkable[next.x, next.y]) continue;
-                float nextCost = currentCost + 1f;
-                if (nextCost < cost[next.x, next.y])
+                var nxt = cur + d;
+                if (nxt.x < 0 || nxt.y < 0 || nxt.x >= width || nxt.y >= height) continue;
+                if (!walkable[nxt.x, nxt.y]) continue;
+
+                float nc = curCost + 1f;
+                if (nc < cost[nxt.x, nxt.y])
                 {
-                    cost[next.x, next.y] = nextCost;
-                    queue.Enqueue(next);
+                    cost[nxt.x, nxt.y] = nc;
+                    queue.Enqueue(nxt);
                 }
             }
         }
 
-        // Compute best direction for each cell (lowest cost neighbor)
+        // 4) Compute best‐move direction per cell
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
-                float minCost = cost[x, y];
-                Vector2 best = Vector2.zero;
-                foreach (var dir in directions)
+                float bestCost = cost[x, y];
+                Vector2 bestDir = Vector2.zero;
+
+                foreach (var d in dirs)
                 {
-                    int nx = x + dir.x, ny = y + dir.y;
+                    int nx = x + d.x, ny = y + d.y;
                     if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-                    if (cost[nx, ny] < minCost)
+                    if (cost[nx, ny] < bestCost)
                     {
-                        minCost = cost[nx, ny];
-                        best = dir;
+                        bestCost = cost[nx, ny];
+                        bestDir = d;
                     }
                 }
-                flowDir[x, y] = best.normalized;
+
+                flowDir[x, y] = bestDir.normalized;
             }
     }
 
+    /// <summary>
+    /// Returns a unit‐length vector pointing from the given cell toward
+    /// the goal along the computed cost gradient.
+    /// </summary>
     public Vector2 GetDirection(Vector2Int cell)
     {
         if (cell.x < 0 || cell.y < 0 || cell.x >= width || cell.y >= height)
