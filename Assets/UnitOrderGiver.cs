@@ -1,29 +1,31 @@
-﻿// UnitOrderGiver.cs
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Tilemaps;
+using System.Collections.Generic;
 
 public class UnitOrderGiver : MonoBehaviour
 {
-    [Tooltip("The Tilemap to use for pathfinding")]
-    public Tilemap tilemap;
+    public Tilemap Tilemap; // Assigned in Inspector
 
-    private FlowField flowField = new FlowField();
-    
-    void Update()
+    public List<UnitMover> SelectedUnits = new List<UnitMover>();
+
+    public void GiveMoveOrder(Vector2 destination)
     {
-        if (!Input.GetMouseButtonDown(1)) return;
+        // Convert destination to grid cell
+        Vector3Int cell = Tilemap.WorldToCell(destination);
+        Vector2Int gridCell = new Vector2Int(cell.x, cell.y);
 
-        Vector3 wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-        wp.z = 0f;
-        Vector3Int targetCell = tilemap.WorldToCell(wp);
+        // Get map size (adjust as needed)
+        int width = Tilemap.size.x;
+        int height = Tilemap.size.y;
 
-        flowField.Generate(tilemap, targetCell);
+        // Generate flow field
+        FlowField field = new FlowField(width, height);
+        field.Generate(gridCell, Tilemap);
 
-        foreach (var sel in UnitSelector.GetSelectedUnits())
+        // Assign to each unit
+        foreach (var unit in SelectedUnits)
         {
-            var mover = sel.GetComponent<UnitMover>();
-            if (mover != null)
-                mover.ApplyFlowField(flowField);
+            unit.SetFlowField(field, gridCell);
         }
     }
 }
