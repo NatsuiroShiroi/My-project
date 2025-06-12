@@ -12,11 +12,10 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tilemap for cell↔world conversions (auto-found if blank)")]
     public Tilemap tilemap;
 
-    [Tooltip("Separation radius in world units")]
-    public float SeparationRadius = 0.75f;
-
-    [Tooltip("Weight of separation steering (0 = ignore, 1 = full separation)")]
-    [Range(0f, 1f)]
+    [Header("Separation (units avoid each other)")]
+    [Tooltip("How far to look for nearby units")]
+    public float SeparationRadius = 0.6f;
+    [Range(0f, 1f), Tooltip("0 = no separation, 1 = full separation")]
     public float SeparationWeight = 0.2f;
 
     private Rigidbody2D rb;
@@ -38,14 +37,14 @@ public class UnitMover : MonoBehaviour
     }
 
     /// <summary>
-    /// Sets the static path for this unit to follow, cell-to-cell.
+    /// Give this unit a precomputed, cell-to-cell path.
     /// </summary>
     public void SetPath(List<Vector2Int> newPath)
     {
         path = newPath;
         if (path != null && path.Count >= 2)
         {
-            pathIndex = 1;  // start moving toward the second point
+            pathIndex = 1;  // start heading toward the second cell
             isMoving = true;
         }
         else
@@ -59,55 +58,62 @@ public class UnitMover : MonoBehaviour
         if (!isMoving || tilemap == null || path == null)
             return;
 
-        // 1) If at final waypoint, snap & stop
+        // If we've reached the last waypoint, snap & stop
         if (pathIndex >= path.Count)
         {
-            var end = path[path.Count - 1];
-            Vector3 endWorld = tilemap.GetCellCenterWorld(new Vector3Int(end.x, end.y, 0));
-            rb.MovePosition(new Vector2(endWorld.x, endWorld.y));
+            var endCell = path[path.Count - 1];
+            Vector3 worldEnd = tilemap.GetCellCenterWorld(
+                new Vector3Int(endCell.x, endCell.y, 0));
+            rb.MovePosition((Vector2)worldEnd);
             isMoving = false;
             return;
         }
 
-        // 2) Compute target direction to next waypoint
-        var cell = path[pathIndex];
-        Vector3 targetWorld3 = tilemap.GetCellCenterWorld(new Vector3Int(cell.x, cell.y, 0));
-        Vector2 targetWorld2 = new Vector2(targetWorld3.x, targetWorld3.y);
-        Vector2 toTarget = targetWorld2 - rb.position;
+        // Compute world-space target for this waypoint
+        Vector2Int cell = path[pathIndex];
+        Vector3 target3 = tilemap.GetCellCenterWorld(
+            new Vector3Int(cell.x, cell.y, 0));
+        Vector2 target2 = (Vector2)target3;
 
-        // 3) Compute separation steering
+        // Vector toward the target
+        Vector2 toTarget = target2 - rb.position;
+        float step = MoveSpeed * Time.fixedDeltaTime;
+
+        // Compute separation vector from nearby units
         Vector2 sep = Vector2.zero;
-        int neighborCount = 0;
-        Collider2D[] hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
+        int count = 0;
+        var hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
         foreach (var hit in hits)
         {
             if (hit.attachedRigidbody != null && hit.attachedRigidbody != rb)
             {
-                Vector2 diff = rb.position - (Vector2)hit.attachedRigidbody.position;
-                float dist = diff.magnitude;
-                if (dist > 0f && dist < SeparationRadius)
+                if (hit.TryGetComponent<UnitMover>(out var _))
                 {
-                    // weighted by inverse distance
-                    sep += diff.normalized * ((SeparationRadius - dist) / SeparationRadius);
-                    neighborCount++;
+                    Vector2 diff = rb.position - hit.attachedRigidbody.position;
+                    float dist = diff.magnitude;
+                    if (dist > 0f && dist < SeparationRadius)
+                    {
+                        // Weighted by closeness
+                        sep += diff.normalized * ((SeparationRadius - dist) / SeparationRadius);
+                        count++;
+                    }
                 }
             }
         }
-        if (neighborCount > 0)
+        if (count > 0)
         {
-            sep /= neighborCount;
+            sep /= count;
             sep = sep.normalized;
         }
 
-        // 4) Blend heading and separation
+        // Blend heading and separation
         Vector2 heading = toTarget.normalized;
         Vector2 desired = (heading * (1f - SeparationWeight) + sep * SeparationWeight).normalized;
 
-        // 5) Move, advance waypoint on arrival
-        float step = MoveSpeed * Time.fixedDeltaTime;
+        // Move: if close enough, snap to cell and advance
         if (toTarget.magnitude <= step)
         {
-            rb.MovePosition(targetWorld2);
+            rb.MovePosition(target2);
             pathIndex++;
         }
         else
