@@ -9,14 +9,16 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tiles per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Same Tilemap assigned in OrderGiver")]
-    public Tilemap Tilemap;
+    [Tooltip("Tilemap used for World↔Cell conversions")]
+    public Tilemap tilemap;
 
     private Rigidbody2D rb;
     private FlowField flowField;
-    private Vector2Int targetCell;
-    private Vector2Int lastCell;
-    private static HashSet<Vector2Int> occupied = new HashSet<Vector2Int>();
+    private Vector2Int goalCell;
+
+    // Track which cell we're on and which we're moving to
+    private Vector2Int lastCell, nextCell;
+    private static HashSet<Vector2Int> occupiedCells = new HashSet<Vector2Int>();
 
     void Awake()
     {
@@ -24,79 +26,73 @@ public class UnitMover : MonoBehaviour
     }
 
     /// <summary>
-    /// Called by OrderGiver when issuing the move
+    /// Called once when a new order arrives.
     /// </summary>
     public void SetFlowField(FlowField field, Vector2Int goal)
     {
         flowField = field;
-        targetCell = goal;
-        Debug.Log($"[UnitMover:{name}] Received flow field. Target = {targetCell}");
+        goalCell = goal;
+        lastCell = new Vector2Int(int.MinValue, int.MinValue);
+        nextCell = goal; // placeholder
     }
 
     void FixedUpdate()
     {
-        if (flowField == null)
-            return;  // no order yet
-
-        if (Tilemap == null)
-        {
-            Debug.LogError($"[UnitMover:{name}] Tilemap not assigned!");
+        if (flowField == null || tilemap == null)
             return;
-        }
 
-        // 1) Which cell am I in?
+        // 1) Figure out which cell we're actually in
         Vector2 worldPos = rb.position;
-        Vector3Int c3 = Tilemap.WorldToCell(worldPos);
-        Vector2Int cur = new Vector2Int(c3.x, c3.y);
+        Vector3Int c3 = tilemap.WorldToCell(worldPos);
+        Vector2Int curCell = new Vector2Int(c3.x, c3.y);
 
-        // 2) Occupancy check on new cell
-        if (cur != lastCell)
+        // 2) If we've reached our final goal, stop
+        if (curCell == goalCell)
+            return;
+
+        // 3) When we enter a brand‐new cell, release the old and reset nextCell
+        if (curCell != lastCell)
         {
-            occupied.Remove(lastCell);
-            if (occupied.Contains(cur))
-            {
-                Debug.Log($"[UnitMover:{name}] cell {cur} occupied, waiting.");
+            occupiedCells.Remove(lastCell);
+            lastCell = curCell;
+            nextCell = curCell;
+        }
+
+        // 4) If we need a fresh “next cell,” pick it via the flow field
+        if (nextCell == curCell)
+        {
+            Vector2 dir = flowField.GetDirection(curCell);
+            if (dir == Vector2.zero)
+                return; // no path
+
+            // Round to a cardinal neighbor
+            int dx = Mathf.RoundToInt(dir.x);
+            int dy = Mathf.RoundToInt(dir.y);
+            Vector2Int candidate = curCell + new Vector2Int(dx, dy);
+
+            // If occupied, wait here
+            if (occupiedCells.Contains(candidate))
                 return;
-            }
-            occupied.Add(cur);
-            lastCell = cur;
-            Debug.Log($"[UnitMover:{name}] Entered cell {cur}");
+
+            // Reserve it and move on
+            occupiedCells.Add(candidate);
+            nextCell = candidate;
         }
 
-        // 3) Reached destination?
-        if (cur == targetCell)
+        // 5) Move straight toward the center of nextCell
+        Vector3Int target3 = new Vector3Int(nextCell.x, nextCell.y, 0);
+        Vector3 targetWorld = tilemap.GetCellCenterWorld(target3);
+        Vector2 toTarget = (Vector2)(targetWorld - worldPos);
+
+        float step = MoveSpeed * Time.fixedDeltaTime;
+        if (toTarget.magnitude <= step)
         {
-            Debug.Log($"[UnitMover:{name}] Reached target cell.");
-            return;
+            // Snap to center if we can reach it this frame
+            rb.MovePosition(targetWorld);
         }
-
-        // 4) Sample flow field
-        Vector2 dir = flowField.GetDirection(cur);
-        if (dir == Vector2.zero)
+        else
         {
-            Debug.Log($"[UnitMover:{name}] No direction at cell {cur} → stuck?");
-            return;
+            rb.MovePosition(worldPos + toTarget.normalized * step);
         }
-
-        // 5) Local separation
-        Vector2 sep = Vector2.zero;
-        foreach (var hit in Physics2D.OverlapCircleAll(worldPos, 0.5f))
-        {
-            if (hit.attachedRigidbody != null && hit.attachedRigidbody != rb)
-                sep += worldPos - (Vector2)hit.attachedRigidbody.position;
-        }
-
-        // 6) Compute move vector
-        Vector2 move = (dir + sep.normalized * 0.7f).normalized
-                       * MoveSpeed * Time.fixedDeltaTime;
-        if (move == Vector2.zero)
-        {
-            Debug.Log($"[UnitMover:{name}] Computed zero move vector.");
-            return;
-        }
-
-        // 7) Perform movement
-        rb.MovePosition(worldPos + move);
-        Debug.Log($"[UnitMover:{name}] Moving {move.magnitude:F3} units towards {dir}");
     }
 }
