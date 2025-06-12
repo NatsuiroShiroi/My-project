@@ -2,26 +2,24 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
-//
+
 public class UnitOrderGiver : MonoBehaviour
 {
     private Tilemap tilemap;
     private SpriteRenderer groundSprite;
     private static readonly Vector2Int[] neighborDirs = {
-        new Vector2Int(1,0),  new Vector2Int(-1,0),
-        new Vector2Int(0,1),  new Vector2Int(0,-1),
-        new Vector2Int(1,1),  new Vector2Int(1,-1),
-        new Vector2Int(-1,1), new Vector2Int(-1,-1)
+        new Vector2Int(1,0), new Vector2Int(-1,0),
+        new Vector2Int(0,1), new Vector2Int(0,-1),
+        new Vector2Int(1,1), new Vector2Int(1,-1),
+        new Vector2Int(-1,1),new Vector2Int(-1,-1)
     };
 
     void Awake()
     {
-        var gridGO = GameObject.Find("Grid");
-        if (gridGO != null)
-            tilemap = gridGO.GetComponentInChildren<Tilemap>();
-        var groundGO = GameObject.Find("Ground");
-        if (groundGO != null)
-            groundSprite = groundGO.GetComponent<SpriteRenderer>();
+        var g = GameObject.Find("Grid");
+        if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
+        var gr = GameObject.Find("Ground");
+        if (gr != null) groundSprite = gr.GetComponent<SpriteRenderer>();
     }
 
     void Update()
@@ -29,7 +27,7 @@ public class UnitOrderGiver : MonoBehaviour
         if (Input.GetMouseButtonDown(1))
         {
             var wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-            wp.z = 0f;
+            wp.z = 0;
             IssueMoveOrder(wp);
         }
     }
@@ -38,10 +36,8 @@ public class UnitOrderGiver : MonoBehaviour
     {
         if (tilemap == null || groundSprite == null) return;
 
-        // Clear prior reservations
         UnitMover.ClearReservations();
 
-        // Gather units
         var sels = UnitSelector.GetSelectedUnits();
         var movers = new List<UnitMover>();
         foreach (var s in sels)
@@ -51,52 +47,47 @@ public class UnitOrderGiver : MonoBehaviour
             movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
         if (movers.Count == 0) return;
 
-        // Ground bounds in cell space
-        Bounds b = groundSprite.bounds;
-        Vector3Int minC = tilemap.WorldToCell(b.min);
-        Vector3Int maxC = tilemap.WorldToCell(b.max);
+        var b = groundSprite.bounds;
+        var minC = tilemap.WorldToCell(b.min);
+        var maxC = tilemap.WorldToCell(b.max);
         int minX = minC.x, minY = minC.y, maxX = maxC.x, maxY = maxC.y;
 
-        // Clamp click
-        Vector3Int c3 = tilemap.WorldToCell(worldDest);
-        Vector2Int baseGoal = new Vector2Int(
-            Mathf.Clamp(c3.x, minX, maxX),
-            Mathf.Clamp(c3.y, minY, maxY)
+        var click3 = tilemap.WorldToCell(worldDest);
+        var baseGoal = new Vector2Int(
+            Mathf.Clamp(click3.x, minX, maxX),
+            Mathf.Clamp(click3.y, minY, maxY)
         );
 
-        // Assign distinct targets
-        var assigned = new HashSet<Vector2Int> { baseGoal };
-        var assignments = new List<(UnitMover, Vector2Int)> {
-            (movers[0], baseGoal)
-        };
-
-        for (int i = 1; i < movers.Count; i++)
+        // BFS to gather nearest free cells
+        var assigned = new HashSet<Vector2Int>();
+        var queue = new Queue<Vector2Int>();
+        var seen = new HashSet<Vector2Int>();
+        var goals = new List<Vector2Int>();
+        queue.Enqueue(baseGoal); seen.Add(baseGoal);
+        while (goals.Count < movers.Count && queue.Count > 0)
         {
-            float bestDist = float.MaxValue;
-            Vector2Int best = baseGoal;
+            var cur = queue.Dequeue();
+            // skip terrain
+            var ctr = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
+            if (Physics2D.OverlapBox(ctr, tilemap.cellSize * 0.9f, 0f) == null)
+            {
+                goals.Add(cur);
+                assigned.Add(cur);
+            }
+            // enqueue neighbors
             foreach (var d in neighborDirs)
             {
-                var cand = baseGoal + d;
-                if (cand.x < minX || cand.x > maxX || cand.y < minY || cand.y > maxY) continue;
-                if (assigned.Contains(cand)) continue;
-                var cent = tilemap.GetCellCenterWorld(new Vector3Int(cand.x, cand.y, 0));
-                if (Physics2D.OverlapBox(cent, tilemap.cellSize * 0.9f, 0f) != null) continue;
-                float dist = (cand - baseGoal).sqrMagnitude;
-                if (dist < bestDist) { bestDist = dist; best = cand; }
-            }
-            if (bestDist < float.MaxValue)
-            {
-                assigned.Add(best);
-                assignments.Add((movers[i], best));
+                var nxt = cur + d;
+                if (nxt.x < minX || nxt.x > maxX || nxt.y < minY || nxt.y > maxY) continue;
+                if (seen.Add(nxt)) queue.Enqueue(nxt);
             }
         }
 
-        int width = maxX - minX + 1;
-        int height = maxY - minY + 1;
-
-        // Create individual flow fields
-        foreach (var (unit, goal) in assignments)
+        int width = maxX - minX + 1, height = maxY - minY + 1;
+        for (int i = 0; i < goals.Count; i++)
         {
+            var unit = movers[i];
+            var goal = goals[i];
             var field = new FlowField(minX, minY, width, height, tilemap);
             field.Generate(goal);
             unit.SetFlowField(field, goal);
