@@ -9,7 +9,7 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tiles per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Tilemap for world↔cell conversions (optional, auto-found if blank)")]
+    [Tooltip("Tilemap for world↔cell conversions (optional)")]
     public Tilemap tilemap;
 
     private Rigidbody2D rb;
@@ -22,49 +22,31 @@ public class UnitMover : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
-
-        // Auto-assign the Tilemap if none set in Inspector
         if (tilemap == null)
         {
-            var gridGO = GameObject.Find("Grid");
-            if (gridGO != null)
-                tilemap = gridGO.GetComponentInChildren<Tilemap>();
-
-            if (tilemap == null)
-                Debug.LogError($"[UnitMover:{name}] Tilemap not assigned or found!");
+            var g = GameObject.Find("Grid");
+            if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
         }
+        if (tilemap == null)
+            Debug.LogError($"[UnitMover:{name}] Tilemap not assigned!");
     }
 
-    /// <summary>
-    /// Clear all cell reservations at the start of a new order.
-    /// </summary>
     public static void ClearReservations() => occupied.Clear();
 
-    /// <summary>
-    /// Assigns a new flow field and goal. Pass null to cancel any movement.
-    /// </summary>
     public void SetFlowField(FlowField field, Vector2Int goal)
     {
         if (field == null)
         {
-            // Cancel any prior motion
             isMoving = false;
-            flowField = null;
             return;
         }
-
-        if (tilemap == null)
-        {
-            Debug.LogError($"[UnitMover:{name}] Cannot move: Tilemap missing.");
-            return;
-        }
+        if (tilemap == null) return;
 
         flowField = field;
         goalCell = goal;
         isMoving = true;
 
-        // Initialize cell tracking & reserve start cell
-        Vector3Int c3 = tilemap.WorldToCell(rb.position);
+        var c3 = tilemap.WorldToCell(rb.position);
         currentCell = new Vector2Int(c3.x, c3.y);
         lastCell = currentCell;
         nextCell = currentCell;
@@ -76,58 +58,62 @@ public class UnitMover : MonoBehaviour
         if (!isMoving || tilemap == null || flowField == null)
             return;
 
-        // 1) Arrived at goal?
+        // Snap & stop if at goal
         if (currentCell == goalCell)
         {
-            // Snap exactly to center
-            Vector3 exact3 = tilemap.GetCellCenterWorld(new Vector3Int(goalCell.x, goalCell.y, 0));
-            rb.MovePosition(new Vector2(exact3.x, exact3.y));
+            var ex = tilemap.GetCellCenterWorld(
+                new Vector3Int(goalCell.x, goalCell.y, 0));
+            rb.MovePosition(new Vector2(ex.x, ex.y));
             isMoving = false;
             return;
         }
 
-        // 2) Arrived at nextCell center?
-        Vector3 nextCtr3 = tilemap.GetCellCenterWorld(new Vector3Int(nextCell.x, nextCell.y, 0));
-        Vector2 nextCtr2 = new Vector2(nextCtr3.x, nextCtr3.y);
-        if ((rb.position - nextCtr2).sqrMagnitude < 0.001f)
+        // Only free when we've actually moved into a new cell
+        if (nextCell != currentCell)
         {
-            occupied.Remove(lastCell);
-            lastCell = currentCell;
-            currentCell = nextCell;
+            var center3 = tilemap.GetCellCenterWorld(
+                new Vector3Int(nextCell.x, nextCell.y, 0));
+            var center2 = new Vector2(center3.x, center3.y);
+            if ((rb.position - center2).sqrMagnitude < 0.001f)
+            {
+                occupied.Remove(currentCell);
+                lastCell = currentCell;
+                currentCell = nextCell;
+            }
         }
 
-        // 3) Pick a new nextCell if needed
+        // Pick nextCell if needed
         if (nextCell == currentCell)
         {
-            // Get the best‐neighbor by true cost, not dot‐score
-            List<(Vector2Int dir, float cost)> neigh = new();
+            // gather valid neighbors with cost
+            var neigh = new List<(Vector2Int d, float c)>();
             foreach (var d in FlowField.Dirs)
             {
                 var cand = currentCell + d;
                 if (!flowField.IsCellInBounds(cand)) continue;
 
-                // Terrain collider
-                var ctr3 = tilemap.GetCellCenterWorld(new Vector3Int(cand.x, cand.y, 0));
+                // terrain block
+                var ctr3 = tilemap.GetCellCenterWorld(
+                    new Vector3Int(cand.x, cand.y, 0));
                 if (Physics2D.OverlapBox(ctr3, tilemap.cellSize * 0.9f, 0f) != null)
                     continue;
 
-                // Prevent diagonal corner‐cutting
+                // corner cut prevention
                 if (d.x != 0 && d.y != 0)
                 {
                     var a1 = new Vector3Int(currentCell.x + d.x, currentCell.y, 0);
                     var a2 = new Vector3Int(currentCell.x, currentCell.y + d.y, 0);
-                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a1), tilemap.cellSize * 0.9f, 0f) != null ||
-                        Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a2), tilemap.cellSize * 0.9f, 0f) != null)
+                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a1),
+                        tilemap.cellSize * 0.9f, 0f) != null ||
+                        Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a2),
+                        tilemap.cellSize * 0.9f, 0f) != null)
                         continue;
                 }
 
-                // Collect cost
-                float cVal = flowField.GetCost(cand);
-                neigh.Add((d, cVal));
+                neigh.Add((d, flowField.GetCost(cand)));
             }
 
-            // Sort by ascending Dijkstra cost
-            neigh.Sort((a, b) => a.cost.CompareTo(b.cost));
+            neigh.Sort((a, b) => a.c.CompareTo(b.c));
 
             Vector2Int chosen = currentCell;
             foreach (var (d, _) in neigh)
@@ -140,7 +126,6 @@ public class UnitMover : MonoBehaviour
                 }
             }
 
-            // If no progress, stop
             if (chosen == currentCell)
             {
                 isMoving = false;
@@ -151,15 +136,13 @@ public class UnitMover : MonoBehaviour
             nextCell = chosen;
         }
 
-        // 4) Step toward nextCell center
-        Vector3 target3 = tilemap.GetCellCenterWorld(new Vector3Int(nextCell.x, nextCell.y, 0));
-        Vector2 target2 = new Vector2(target3.x, target3.y);
-        Vector2 delta = target2 - rb.position;
+        // Move toward nextCell
+        var t3 = tilemap.GetCellCenterWorld(
+            new Vector3Int(nextCell.x, nextCell.y, 0));
+        var t2 = new Vector2(t3.x, t3.y);
+        var delta = t2 - rb.position;
         float step = MoveSpeed * Time.fixedDeltaTime;
 
-        if (delta.magnitude <= step)
-            rb.MovePosition(target2);
-        else
-            rb.MovePosition(rb.position + delta.normalized * step);
+        rb.MovePosition(rb.position + delta.normalized * Mathf.Min(step, delta.magnitude));
     }
 }
