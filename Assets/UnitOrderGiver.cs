@@ -8,93 +8,114 @@ public class UnitOrderGiver : MonoBehaviour
     private Tilemap tilemap;
     private SpriteRenderer groundSprite;
 
+    [Tooltip("LayerMask for static terrain obstacles")]
+    public LayerMask obstacleMask;
+
+    // 8‐way neighbor offsets, reused for BFS goal assignment
+    private static readonly Vector2Int[] neighborDirs = FlowField.Dirs;
+
     void Awake()
     {
-        var g = GameObject.Find("Grid");
-        if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
-        var gr = GameObject.Find("Ground");
-        if (gr != null) groundSprite = gr.GetComponent<SpriteRenderer>();
+        // Auto‐find Grid → Tilemap
+        var gridGO = GameObject.Find("Grid");
+        if (gridGO != null)
+            tilemap = gridGO.GetComponentInChildren<Tilemap>();
+
+        // Auto‐find Ground sprite
+        var groundGO = GameObject.Find("Ground");
+        if (groundGO != null)
+            groundSprite = groundGO.GetComponent<SpriteRenderer>();
     }
 
     void Update()
     {
         if (Input.GetMouseButtonDown(1))
         {
-            var wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-            wp.z = 0f;
-            IssueMoveOrder(wp);
+            Vector3 worldPoint = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+            worldPoint.z = 0f;
+            IssueMoveOrder(worldPoint);
         }
     }
 
     void IssueMoveOrder(Vector3 worldDest)
     {
-        if (tilemap == null || groundSprite == null) return;
+        if (tilemap == null || groundSprite == null)
+            return;
 
-        // 1) Gather units
-        var sels = UnitSelector.GetSelectedUnits();
+        // Clear previous unit reservations
+        UnitMover.ClearReservations();
+
+        // Gather selected units (or all, if none)
+        var selectors = UnitSelector.GetSelectedUnits();
         var movers = new List<UnitMover>();
-        foreach (var s in sels)
-            if (s.TryGetComponent(out UnitMover mv))
+        foreach (var s in selectors)
+            if (s.TryGetComponent<UnitMover>(out var mv))
                 movers.Add(mv);
         if (movers.Count == 0)
             movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
+        if (movers.Count == 0)
+            return;
 
-        // 2) Compute ground bounds inset half tile
-        var bs = groundSprite.bounds;
-        var inset = tilemap.cellSize * 0.5f;
-        var minC = tilemap.WorldToCell(bs.min + inset);
-        var maxC = tilemap.WorldToCell(bs.max - inset);
+        // Compute ground cell bounds (inset half a cell)
+        Bounds bs = groundSprite.bounds;
+        Vector3 inset = tilemap.cellSize * 0.5f;
+        Vector3 worldMin = bs.min + inset;
+        Vector3 worldMax = bs.max - inset;
+        Vector3Int minC = tilemap.WorldToCell(worldMin);
+        Vector3Int maxC = tilemap.WorldToCell(worldMax);
 
-        // 3) Clamp click
-        var c3 = tilemap.WorldToCell(worldDest);
-        var baseGoal = new Vector2Int(
-            Mathf.Clamp(c3.x, minC.x, maxC.x),
-            Mathf.Clamp(c3.y, minC.y, maxC.y)
+        // Clamp clicked destination inside ground
+        Vector3Int clickC = tilemap.WorldToCell(worldDest);
+        Vector2Int baseGoal = new Vector2Int(
+            Mathf.Clamp(clickC.x, minC.x, maxC.x),
+            Mathf.Clamp(clickC.y, minC.y, maxC.y)
         );
 
-        // 4) BFS to assign N nearest free cells
+        // BFS outward to pick N free goal cells
         var goals = new List<Vector2Int>();
         var seen = new HashSet<Vector2Int>();
-        var q = new Queue<Vector2Int>();
-        q.Enqueue(baseGoal);
+        var queue = new Queue<Vector2Int>();
+        queue.Enqueue(baseGoal);
         seen.Add(baseGoal);
 
-        while (goals.Count < movers.Count && q.Count > 0)
+        while (goals.Count < movers.Count && queue.Count > 0)
         {
-            var cur = q.Dequeue();
-            // skip terrain
-            var ctr = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
-            if (Physics2D.OverlapBox(ctr, tilemap.cellSize * 0.9f, 0f) == null)
-                goals.Add(cur);
+            var cur = queue.Dequeue();
 
-            foreach (var d in FlowField.Dirs)
+            // Skip if this cell is blocked by static terrain
+            Vector3 worldCtr = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
+            if (Physics2D.OverlapBox(worldCtr, tilemap.cellSize * 0.9f, 0f, obstacleMask) == null)
+            {
+                goals.Add(cur);
+            }
+
+            // Enqueue neighbors
+            foreach (var d in neighborDirs)
             {
                 var nxt = cur + d;
                 if (nxt.x < minC.x || nxt.x > maxC.x || nxt.y < minC.y || nxt.y > maxC.y)
                     continue;
-                if (seen.Add(nxt)) q.Enqueue(nxt);
+                if (seen.Add(nxt))
+                    queue.Enqueue(nxt);
             }
         }
 
-        // 5) Issue each unit its static path
+        // Build and assign a FlowField & move order per unit
         int width = maxC.x - minC.x + 1;
         int height = maxC.y - minC.y + 1;
-        for (int i = 0; i < movers.Count && i < goals.Count; i++)
+        for (int i = 0; i < goals.Count && i < movers.Count; i++)
         {
             var unit = movers[i];
             var goal = goals[i];
-            var field = new FlowField(minC.x, minC.y, width, height, tilemap);
-            field.Generate(goal);
 
-            // backtrace a static path
-            var path = field.GetPath(
-                new Vector2Int(
-                    tilemap.WorldToCell(unit.transform.position).x,
-                    tilemap.WorldToCell(unit.transform.position).y
-                ),
-                goal
+            var field = new FlowField(
+                minC.x, minC.y,
+                width, height,
+                tilemap,
+                obstacleMask    // ← pass in your terrain LayerMask here
             );
-            unit.SetPath(path);
+            field.Generate(goal);
+            unit.SetFlowField(field, goal);
         }
     }
 }
