@@ -81,14 +81,17 @@ public class UnitMover : MonoBehaviour
 
         // 5) Move straight toward the center of nextCell
         Vector3Int target3 = new Vector3Int(nextCell.x, nextCell.y, 0);
-        Vector3 targetWorld = tilemap.GetCellCenterWorld(target3);
-        Vector2 toTarget = (Vector2)(targetWorld - worldPos);
+        Vector3 targetWorld3 = tilemap.GetCellCenterWorld(target3);
+
+        // **Fix: cast to Vector2 before subtracting Vector2 worldPos**
+        Vector2 targetWorld2 = new Vector2(targetWorld3.x, targetWorld3.y);
+        Vector2 toTarget = targetWorld2 - worldPos;
 
         float step = MoveSpeed * Time.fixedDeltaTime;
         if (toTarget.magnitude <= step)
         {
             // Snap to center if we can reach it this frame
-            rb.MovePosition(targetWorld);
+            rb.MovePosition(targetWorld2);
         }
         else
         {
