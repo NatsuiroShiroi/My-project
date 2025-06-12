@@ -34,7 +34,8 @@ public class UnitOrderGiver : MonoBehaviour
         // C) Fallback: if none selected, move *all* units so you can test
         if (movers.Count == 0)
         {
-            var all = FindObjectsOfType<UnitMover>();
+            // Use the new FindObjectsByType API instead of the obsolete FindObjectsOfType
+            var all = FindObjectsByType<UnitMover>(FindObjectsSortMode.None);
             Debug.Log($"[OrderGiver] No selection—falling back to {all.Length} total movers.");
             movers.AddRange(all);
         }
