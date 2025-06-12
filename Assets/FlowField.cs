@@ -13,10 +13,10 @@ public class FlowField
     private readonly LayerMask obstacleMask;
 
     public static readonly Vector2Int[] Dirs = {
-        new Vector2Int(1,0),  new Vector2Int(-1,0),
-        new Vector2Int(0,1),  new Vector2Int(0,-1),
-        new Vector2Int(1,1),  new Vector2Int(1,-1),
-        new Vector2Int(-1,1), new Vector2Int(-1,-1)
+        new Vector2Int(1,0),   new Vector2Int(-1,0),
+        new Vector2Int(0,1),   new Vector2Int(0,-1),
+        new Vector2Int(1,1),   new Vector2Int(1,-1),
+        new Vector2Int(-1,1),  new Vector2Int(-1,-1)
     };
     private static readonly float[] DirCost = {
         1f,1f,1f,1f,
@@ -42,7 +42,7 @@ public class FlowField
         int gx = goal.x - originX, gy = goal.y - originY;
         if (gx < 0 || gy < 0 || gx >= width || gy >= height) return;
 
-        // initialize costs
+        // init
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 cost[x, y] = float.MaxValue;
@@ -63,18 +63,17 @@ public class FlowField
                 int nx = cur.x + d.x, ny = cur.y + d.y;
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
-                // world position of candidate
+                // world‐position of candidate cell
                 var cellPos = new Vector3Int(nx + originX, ny + originY, 0);
                 Vector3 worldCenter = tilemap.GetCellCenterWorld(cellPos);
 
-                // 1) skip if target cell blocked by static terrain
+                // 1) skip if target cell blocked by terrain
                 if (Physics2D.OverlapBox(worldCenter, tilemap.cellSize, 0f, obstacleMask) != null)
                     continue;
 
-                // ◼︎ AoE II “no corner-cut”:
+                // ◼︎ AoE II “no corner-cut” check (8 lines only):
                 if (d.x != 0 && d.y != 0)
                 {
-                    // check the two orthogonal neighbors
                     var o1 = new Vector3Int(cur.x + d.x + originX, cur.y + originY, 0);
                     var o2 = new Vector3Int(cur.x + originX, cur.y + d.y + originY, 0);
                     if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o1), tilemap.cellSize, 0f, obstacleMask) != null
@@ -94,7 +93,7 @@ public class FlowField
             }
         }
 
-        // build flow directions
+        // compute flowDir
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
@@ -114,11 +113,46 @@ public class FlowField
             }
     }
 
+    /// <summary>
+    /// Retrieve raw Dijkstra cost for back-tracing.
+    /// </summary>
     public float GetCost(Vector2Int cell)
     {
         int rx = cell.x - originX, ry = cell.y - originY;
         if (rx < 0 || ry < 0 || rx >= width || ry >= height) return float.MaxValue;
         return cost[rx, ry];
+    }
+
+    /// <summary>
+    /// Back-trace a static path from start → goal using stored costs.
+    /// </summary>
+    public List<Vector2Int> GetPath(Vector2Int start, Vector2Int goal)
+    {
+        var path = new List<Vector2Int>();
+        if (!IsCellInBounds(start) || !IsCellInBounds(goal)) return path;
+
+        Vector2Int cur = start;
+        path.Add(cur);
+        while (cur != goal)
+        {
+            float best = GetCost(cur);
+            Vector2Int next = cur;
+            foreach (var d in Dirs)
+            {
+                var cand = cur + d;
+                if (!IsCellInBounds(cand)) continue;
+                float cVal = GetCost(cand);
+                if (cVal < best)
+                {
+                    best = cVal;
+                    next = cand;
+                }
+            }
+            if (next == cur) break;  // stuck
+            cur = next;
+            path.Add(cur);
+        }
+        return path;
     }
 
     public Vector2 GetDirection(Vector2Int cell)
