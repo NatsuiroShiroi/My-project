@@ -1,63 +1,79 @@
-﻿using UnityEngine;
+﻿// Assets/UnitMover.cs
+using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.Tilemaps;
 
 [RequireComponent(typeof(Rigidbody2D))]
 public class UnitMover : MonoBehaviour
 {
-    public float MoveSpeed = 3.0f;
+    [Tooltip("Tiles per second")]
+    public float MoveSpeed = 3f;
+
+    [Tooltip("Reference your Grid→Tilemap here")]
     public Tilemap Tilemap;
+
+    // Shared occupancy set prevents two units stepping into the same cell
+    private static HashSet<Vector2Int> occupiedCells = new HashSet<Vector2Int>();
+
     private Rigidbody2D rb;
     private FlowField flowField;
     private Vector2Int targetCell;
     private Vector2Int lastCell;
-    private static System.Collections.Generic.HashSet<Vector2Int> occupiedCells = new System.Collections.Generic.HashSet<Vector2Int>();
 
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
     }
 
-    public void SetFlowField(FlowField field, Vector2Int target)
+    /// <summary>
+    /// Called by your order‐giver to hand this unit its pathing field
+    /// </summary>
+    public void SetFlowField(FlowField field, Vector2Int dest)
     {
         flowField = field;
-        targetCell = target;
+        targetCell = dest;
     }
 
     void FixedUpdate()
     {
-        if (flowField == null || Tilemap == null) return;
+        if (flowField == null || Tilemap == null)
+            return;
 
         Vector2 worldPos = rb.position;
-        Vector3Int cell = Tilemap.WorldToCell(worldPos);
-        Vector2Int currentCell = new Vector2Int(cell.x, cell.y);
+        Vector3Int cell3 = Tilemap.WorldToCell(worldPos);
+        var curCell = new Vector2Int(cell3.x, cell3.y);
 
-        // Only update occupancy when entering a new cell
-        if (currentCell != lastCell)
+        // 1) Claim occupancy on entering a new cell
+        if (curCell != lastCell)
         {
             occupiedCells.Remove(lastCell);
-            if (occupiedCells.Contains(currentCell))
-                return; // Cell occupied, do not move
-            occupiedCells.Add(currentCell);
-            lastCell = currentCell;
+            if (occupiedCells.Contains(curCell))
+                return;          // someone else is here; wait
+            occupiedCells.Add(curCell);
+            lastCell = curCell;
         }
 
-        // If reached destination
-        if (currentCell == targetCell) return;
+        // 2) If at destination, stop
+        if (curCell == targetCell)
+            return;
 
-        // Follow flow field
-        Vector2 dir = flowField.GetDirection(currentCell);
-        if (dir == Vector2.zero) return;
+        // 3) Sample flow‐field gradient
+        Vector2 dir = flowField.GetDirection(curCell);
+        if (dir == Vector2.zero)
+            return;
 
-        // Separation from nearby units
+        // 4) Simple local separation (diagonal dodge)
         Vector2 sep = Vector2.zero;
-        Collider2D[] hits = Physics2D.OverlapCircleAll(worldPos, 0.5f);
-        foreach (var hit in hits)
+        foreach (var hit in Physics2D.OverlapCircleAll(worldPos, 0.5f))
         {
-            if (hit.attachedRigidbody == null || hit.attachedRigidbody == rb) continue;
-            sep += (Vector2)(worldPos - hit.attachedRigidbody.position);
+            if (hit.attachedRigidbody != null && hit.attachedRigidbody != rb)
+                sep += (worldPos - (Vector2)hit.attachedRigidbody.position);
         }
 
-        Vector2 moveVec = (dir + sep.normalized * 0.7f).normalized * MoveSpeed * Time.fixedDeltaTime;
-        rb.MovePosition(worldPos + moveVec);
+        // 5) Combine steering and move
+        Vector2 move = (dir + sep.normalized * 0.7f).normalized
+                       * MoveSpeed * Time.fixedDeltaTime;
+
+        rb.MovePosition(worldPos + move);
     }
 }
