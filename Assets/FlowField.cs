@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿// Assets/FlowField.cs
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -8,6 +9,18 @@ public class FlowField
     private readonly float[,] cost;
     private readonly Vector2[,] flowDir;
     private readonly Tilemap tilemap;
+
+    // 8‐way directions with proper costs
+    private readonly Vector2Int[] dirs = {
+        new Vector2Int(1,0),   new Vector2Int(-1,0),
+        new Vector2Int(0,1),   new Vector2Int(0,-1),
+        new Vector2Int(1,1),   new Vector2Int(1,-1),
+        new Vector2Int(-1,1),  new Vector2Int(-1,-1)
+    };
+    private readonly float[] dirCost = {
+        1f,1f,1f,1f, Mathf.Sqrt(2f), Mathf.Sqrt(2f),
+        Mathf.Sqrt(2f), Mathf.Sqrt(2f)
+    };
 
     public FlowField(int originX, int originY, int width, int height, Tilemap tilemap)
     {
@@ -23,62 +36,61 @@ public class FlowField
 
     public void Generate(Vector2Int goal)
     {
-        int gx = goal.x - originX;
-        int gy = goal.y - originY;
+        int gx = goal.x - originX, gy = goal.y - originY;
         if (gx < 0 || gy < 0 || gx >= width || gy >= height) return;
 
-        // Build walkable mask & init cost
-        bool[,] walkable = new bool[width, height];
+        // 1) init
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
-            {
-                var cell = new Vector3Int(x + originX, y + originY, 0);
-                Vector3 center = tilemap.CellToWorld(cell) + tilemap.cellSize * 0.5f;
-                bool blocked = Physics2D.OverlapBox(center, tilemap.cellSize, 0f) != null;
-                walkable[x, y] = !blocked;
                 cost[x, y] = float.MaxValue;
-            }
 
-        // Flood‐fill
-        var q = new Queue<Vector2Int>();
         cost[gx, gy] = 0f;
-        q.Enqueue(new Vector2Int(gx, gy));
-        var dirs = new[] { Vector2Int.right, Vector2Int.left, Vector2Int.up, Vector2Int.down };
-        while (q.Count > 0)
+        var pq = new SimplePriorityQueue<Vector2Int>();
+        pq.Enqueue(new Vector2Int(gx, gy), 0f);
+
+        // 2) Dijkstra flood‐fill
+        while (pq.Count > 0)
         {
-            var c = q.Dequeue();
-            float cc = cost[c.x, c.y];
-            foreach (var d in dirs)
+            var cur = pq.Dequeue();
+            float cCost = cost[cur.x, cur.y];
+            for (int i = 0; i < dirs.Length; i++)
             {
-                int nx = c.x + d.x, ny = c.y + d.y;
+                var d = dirs[i];
+                int nx = cur.x + d.x, ny = cur.y + d.y;
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-                if (!walkable[nx, ny]) continue;
-                float nc = cc + 1f;
+
+                // obstacle check
+                var center = tilemap.GetCellCenterWorld(new Vector3Int(nx + originX, ny + originY, 0));
+                if (Physics2D.OverlapBox(center, tilemap.cellSize * 0.9f, 0f) != null)
+                    continue;
+
+                float nc = cCost + dirCost[i];
                 if (nc < cost[nx, ny])
                 {
                     cost[nx, ny] = nc;
-                    q.Enqueue(new Vector2Int(nx, ny));
+                    pq.Enqueue(new Vector2Int(nx, ny), nc);
                 }
             }
         }
 
-        // Compute flowDir
+        // 3) compute best‐neighbor dir
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
                 float best = cost[x, y];
-                Vector2 v = Vector2.zero;
-                foreach (var d in dirs)
+                Vector2 bestDir = Vector2.zero;
+                for (int i = 0; i < dirs.Length; i++)
                 {
+                    var d = dirs[i];
                     int nx = x + d.x, ny = y + d.y;
                     if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
                     if (cost[nx, ny] < best)
                     {
                         best = cost[nx, ny];
-                        v = d;
+                        bestDir = d;
                     }
                 }
-                flowDir[x, y] = v.normalized;
+                flowDir[x, y] = bestDir.normalized;
             }
     }
 
