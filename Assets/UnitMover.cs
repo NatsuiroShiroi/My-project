@@ -5,11 +5,12 @@ using UnityEngine.Tilemaps;
 public class UnitMover : MonoBehaviour
 {
     public float MoveSpeed = 3.0f;
-    public Tilemap Tilemap; // Assign in inspector
+    public Tilemap Tilemap;
     private Rigidbody2D rb;
     private FlowField flowField;
     private Vector2Int targetCell;
     private Vector2Int lastCell;
+    private static System.Collections.Generic.HashSet<Vector2Int> occupiedCells = new System.Collections.Generic.HashSet<Vector2Int>();
 
     void Awake()
     {
@@ -33,9 +34,10 @@ public class UnitMover : MonoBehaviour
         // Only update occupancy when entering a new cell
         if (currentCell != lastCell)
         {
-            GridCellManager.Instance.ReleaseCell(lastCell);
-            if (!GridCellManager.Instance.TryReserveCell(currentCell))
+            occupiedCells.Remove(lastCell);
+            if (occupiedCells.Contains(currentCell))
                 return; // Cell occupied, do not move
+            occupiedCells.Add(currentCell);
             lastCell = currentCell;
         }
 
@@ -46,7 +48,7 @@ public class UnitMover : MonoBehaviour
         Vector2 dir = flowField.GetDirection(currentCell);
         if (dir == Vector2.zero) return;
 
-        // Separation from nearby units (simple version)
+        // Separation from nearby units
         Vector2 sep = Vector2.zero;
         Collider2D[] hits = Physics2D.OverlapCircleAll(worldPos, 0.5f);
         foreach (var hit in hits)
