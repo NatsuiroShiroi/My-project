@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿// Assets/UnitOrderGiver.cs
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -9,15 +10,19 @@ public class UnitOrderGiver : MonoBehaviour
 
     void Awake()
     {
-        // Auto‐find the Tilemap under "Grid"
+        // Auto‐find your Grid → Tilemap
         var gridGO = GameObject.Find("Grid");
         if (gridGO != null)
             tilemap = gridGO.GetComponentInChildren<Tilemap>();
+        if (tilemap == null)
+            Debug.LogError("[OrderGiver] Could not find Grid → Tilemap!");
 
-        // Auto‐find the Ground sprite
+        // Auto‐find your Ground sprite
         var groundGO = GameObject.Find("Ground");
         if (groundGO != null)
             groundSprite = groundGO.GetComponent<SpriteRenderer>();
+        if (groundSprite == null)
+            Debug.LogError("[OrderGiver] Could not find Ground → SpriteRenderer!");
     }
 
     void Update()
@@ -32,35 +37,46 @@ public class UnitOrderGiver : MonoBehaviour
 
     void IssueMoveOrder(Vector3 worldDest)
     {
-        if (tilemap == null || groundSprite == null) return;
+        if (tilemap == null || groundSprite == null)
+            return;
 
-        // 1) Gather movers
-        var sels = UnitSelector.GetSelectedUnits();
+        // --- CLEAR ALL CELL RESERVATIONS FROM PREVIOUS ORDER ---
+        UnitMover.ClearReservations();
+
+        // 1) Gather selected units (fallback to all)
+        var selectors = UnitSelector.GetSelectedUnits();
         var movers = new List<UnitMover>();
-        foreach (var s in sels)
-            if (s.TryGetComponent<UnitMover>(out var mv))
+        foreach (var sel in selectors)
+            if (sel.TryGetComponent<UnitMover>(out var mv))
                 movers.Add(mv);
+
         if (movers.Count == 0)
+        {
             movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
-        if (movers.Count == 0) return;
+        }
 
-        // 2) Compute grid from Ground.bounds
+        if (movers.Count == 0)
+            return;
+
+        // 2) Derive grid bounds from Ground.sprite
         Bounds b = groundSprite.bounds;
-        Vector3Int minCell = tilemap.WorldToCell(b.min);
-        Vector3Int maxCell = tilemap.WorldToCell(b.max);
-        int originX = minCell.x;
-        int originY = minCell.y;
-        int width = maxCell.x - minCell.x + 1;
-        int height = maxCell.y - minCell.y + 1;
+        Vector3Int min = tilemap.WorldToCell(b.min);
+        Vector3Int max = tilemap.WorldToCell(b.max);
+        int originX = min.x;
+        int originY = min.y;
+        int width = max.x - min.x + 1;
+        int height = max.y - min.y + 1;
 
-        // 3) Build & generate flow field
+        // 3) Create and fill the flow field
         var field = new FlowField(originX, originY, width, height, tilemap);
-        Vector3Int c3 = tilemap.WorldToCell(worldDest);
-        var goal = new Vector2Int(c3.x, c3.y);
-        field.Generate(goal);
 
-        // 4) Issue to all movers
+        // 4) Compute the goal cell
+        Vector3Int c3 = tilemap.WorldToCell(worldDest);
+        Vector2Int goalCell = new Vector2Int(c3.x, c3.y);
+
+        // 5) Generate and hand off
+        field.Generate(goalCell);
         foreach (var u in movers)
-            u.SetFlowField(field, goal);
+            u.SetFlowField(field, goalCell);
     }
 }
