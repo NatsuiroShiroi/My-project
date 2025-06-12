@@ -10,19 +10,19 @@ public class UnitOrderGiver : MonoBehaviour
 
     void Awake()
     {
-        // Auto‐find your Grid → Tilemap
+        // Auto-find Grid→Tilemap
         var gridGO = GameObject.Find("Grid");
         if (gridGO != null)
             tilemap = gridGO.GetComponentInChildren<Tilemap>();
         if (tilemap == null)
-            Debug.LogError("[OrderGiver] Could not find Grid → Tilemap!");
+            Debug.LogError("[OrderGiver] Could not find Grid→Tilemap!");
 
-        // Auto‐find your Ground sprite
+        // Auto-find Ground sprite
         var groundGO = GameObject.Find("Ground");
         if (groundGO != null)
             groundSprite = groundGO.GetComponent<SpriteRenderer>();
         if (groundSprite == null)
-            Debug.LogError("[OrderGiver] Could not find Ground → SpriteRenderer!");
+            Debug.LogError("[OrderGiver] Could not find Ground→SpriteRenderer!");
     }
 
     void Update()
@@ -37,46 +37,88 @@ public class UnitOrderGiver : MonoBehaviour
 
     void IssueMoveOrder(Vector3 worldDest)
     {
-        if (tilemap == null || groundSprite == null)
-            return;
+        if (tilemap == null || groundSprite == null) return;
 
-        // --- CLEAR ALL CELL RESERVATIONS FROM PREVIOUS ORDER ---
+        // --- 0) Clear previous unit reservations ---
         UnitMover.ClearReservations();
 
-        // 1) Gather selected units (fallback to all)
-        var selectors = UnitSelector.GetSelectedUnits();
+        // --- 1) Gather movers ---
+        var sels = UnitSelector.GetSelectedUnits();
         var movers = new List<UnitMover>();
-        foreach (var sel in selectors)
-            if (sel.TryGetComponent<UnitMover>(out var mv))
+        foreach (var s in sels)
+            if (s.TryGetComponent<UnitMover>(out var mv))
                 movers.Add(mv);
-
         if (movers.Count == 0)
-        {
             movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
-        }
+        if (movers.Count == 0) return;
 
-        if (movers.Count == 0)
-            return;
-
-        // 2) Derive grid bounds from Ground.sprite
+        // --- 2) Compute ground bounds in cell coords (min,max) ---
         Bounds b = groundSprite.bounds;
-        Vector3Int min = tilemap.WorldToCell(b.min);
-        Vector3Int max = tilemap.WorldToCell(b.max);
-        int originX = min.x;
-        int originY = min.y;
-        int width = max.x - min.x + 1;
-        int height = max.y - min.y + 1;
+        Vector3Int minC = tilemap.WorldToCell(b.min);
+        Vector3Int maxC = tilemap.WorldToCell(b.max);
+        int minX = minC.x, minY = minC.y;
+        int maxX = maxC.x, maxY = maxC.y;
 
-        // 3) Create and fill the flow field
-        var field = new FlowField(originX, originY, width, height, tilemap);
+        // --- 3) Clamp clicked destination to ground ---
+        Vector3Int clickedCell3 = tilemap.WorldToCell(worldDest);
+        int goalX = Mathf.Clamp(clickedCell3.x, minX, maxX);
+        int goalY = Mathf.Clamp(clickedCell3.y, minY, maxY);
+        Vector2Int baseGoal = new Vector2Int(goalX, goalY);
 
-        // 4) Compute the goal cell
-        Vector3Int c3 = tilemap.WorldToCell(worldDest);
-        Vector2Int goalCell = new Vector2Int(c3.x, c3.y);
+        // --- 4) Assign each unit its own target cell ---
+        var assigned = new HashSet<Vector2Int>();
+        // Always reserve the base goal first if free
+        if (!assigned.Contains(baseGoal))
+            assigned.Add(baseGoal);
 
-        // 5) Generate and hand off
-        field.Generate(goalCell);
-        foreach (var u in movers)
-            u.SetFlowField(field, goalCell);
+        for (int i = 0; i < movers.Count; i++)
+        {
+            var unit = movers[i];
+            Vector2Int target = baseGoal;
+
+            if (i > 0)
+            {
+                // find nearest free neighbor around baseGoal
+                float bestDist = float.MaxValue;
+                Vector2Int best = baseGoal;
+                foreach (var d in new[]{
+                    Vector2Int.right, Vector2Int.left, Vector2Int.up, Vector2Int.down,
+                    new Vector2Int(1,1), new Vector2Int(1,-1),
+                    new Vector2Int(-1,1), new Vector2Int(-1,-1)
+                })
+                {
+                    var cand = baseGoal + d;
+                    // check within bounds
+                    if (cand.x < minX || cand.x > maxX || cand.y < minY || cand.y > maxY)
+                        continue;
+                    // skip if already assigned
+                    if (assigned.Contains(cand))
+                        continue;
+                    // skip if obstacle
+                    Vector3Int cand3 = new Vector3Int(cand.x, cand.y, 0);
+                    Vector3 worldCenter = tilemap.GetCellCenterWorld(cand3);
+                    if (Physics2D.OverlapBox(worldCenter, tilemap.cellSize * 0.9f, 0f) != null)
+                        continue;
+                    // pick closest
+                    float dist = d.sqrMagnitude;
+                    if (dist < bestDist)
+                    {
+                        bestDist = dist;
+                        best = cand;
+                    }
+                }
+                target = best;
+                assigned.Add(target);
+            }
+
+            // --- 5) Build & assign a flow field for this unit’s target ---
+            int originX = minX, originY = minY;
+            int width = maxX - minX + 1;
+            int height = maxY - minY + 1;
+
+            var field = new FlowField(originX, originY, width, height, tilemap);
+            field.Generate(target);
+            unit.SetFlowField(field, target);
+        }
     }
 }
