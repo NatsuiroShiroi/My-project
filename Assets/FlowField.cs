@@ -11,12 +11,12 @@ public class FlowField
     private readonly Vector2[,] flowDir;
     private readonly Tilemap tilemap;
 
-    // 8‐way directions with proper move costs
+    // 8‐way directions + costs
     private static readonly Vector2Int[] dirs = {
-        new Vector2Int(1,0),   new Vector2Int(-1,0),
-        new Vector2Int(0,1),   new Vector2Int(0,-1),
-        new Vector2Int(1,1),   new Vector2Int(1,-1),
-        new Vector2Int(-1,1),  new Vector2Int(-1,-1)
+        new Vector2Int(1,0),  new Vector2Int(-1,0),
+        new Vector2Int(0,1),  new Vector2Int(0,-1),
+        new Vector2Int(1,1),  new Vector2Int(1,-1),
+        new Vector2Int(-1,1), new Vector2Int(-1,-1)
     };
     private static readonly float[] dirCost = {
         1f,1f,1f,1f,
@@ -31,21 +31,16 @@ public class FlowField
         this.width = width;
         this.height = height;
         this.tilemap = tilemap;
-
         cost = new float[width, height];
         flowDir = new Vector2[width, height];
     }
 
-    /// <summary>
-    /// Builds the cost field (Dijkstra) and computes flowDir arrays.
-    /// </summary>
     public void Generate(Vector2Int goal)
     {
         int gx = goal.x - originX, gy = goal.y - originY;
-        if (gx < 0 || gy < 0 || gx >= width || gy >= height)
-            return;
+        if (gx < 0 || gy < 0 || gx >= width || gy >= height) return;
 
-        // Initialize
+        // init
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 cost[x, y] = float.MaxValue;
@@ -54,24 +49,22 @@ public class FlowField
         cost[gx, gy] = 0f;
         pq.Enqueue(new Vector2Int(gx, gy), 0f);
 
-        // Flood‐fill
+        // Dijkstra
         while (pq.Count > 0)
         {
             var cur = pq.Dequeue();
-            float cCost = cost[cur.x, cur.y];
+            float cc = cost[cur.x, cur.y];
             for (int i = 0; i < dirs.Length; i++)
             {
                 var d = dirs[i];
                 int nx = cur.x + d.x, ny = cur.y + d.y;
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
-                // Terrain blocking
-                Vector3 center = tilemap.GetCellCenterWorld(
-                    new Vector3Int(nx + originX, ny + originY, 0));
-                if (Physics2D.OverlapBox(center, tilemap.cellSize * 0.9f, 0f) != null)
-                    continue;
+                // terrain block
+                Vector3 cent = tilemap.GetCellCenterWorld(new Vector3Int(nx + originX, ny + originY, 0));
+                if (Physics2D.OverlapBox(cent, tilemap.cellSize * 0.9f, 0f) != null) continue;
 
-                float nc = cCost + dirCost[i];
+                float nc = cc + dirCost[i];
                 if (nc < cost[nx, ny])
                 {
                     cost[nx, ny] = nc;
@@ -80,13 +73,12 @@ public class FlowField
             }
         }
 
-        // Compute flow directions
+        // flow directions
         for (int x = 0; x < width; x++)
-        {
             for (int y = 0; y < height; y++)
             {
                 float best = cost[x, y];
-                Vector2 bestDir = Vector2.zero;
+                Vector2 bd = Vector2.zero;
                 for (int i = 0; i < dirs.Length; i++)
                 {
                     var d = dirs[i];
@@ -95,28 +87,20 @@ public class FlowField
                     if (cost[nx, ny] < best)
                     {
                         best = cost[nx, ny];
-                        bestDir = d;
+                        bd = d;
                     }
                 }
-                flowDir[x, y] = bestDir.normalized;
+                flowDir[x, y] = bd.normalized;
             }
-        }
     }
 
-    /// <summary>
-    /// Returns the local flow direction (unit vector) for a grid cell in world coords.
-    /// </summary>
     public Vector2 GetDirection(Vector2Int cell)
     {
         int rx = cell.x - originX, ry = cell.y - originY;
-        if (rx < 0 || ry < 0 || rx >= width || ry >= height)
-            return Vector2.zero;
+        if (rx < 0 || ry < 0 || rx >= width || ry >= height) return Vector2.zero;
         return flowDir[rx, ry];
     }
 
-    /// <summary>
-    /// Returns true if the given world‐cell lies within the field’s bounds.
-    /// </summary>
     public bool IsCellInBounds(Vector2Int cell)
     {
         int rx = cell.x - originX, ry = cell.y - originY;
