@@ -9,12 +9,12 @@ public class FlowField
     private float[,] cost;
     private Vector2[,] flowDir;
 
-    public FlowField(int w, int h)
+    public FlowField(int width, int height)
     {
-        width = w;
-        height = h;
-        cost = new float[w, h];
-        flowDir = new Vector2[w, h];
+        this.width = width;
+        this.height = height;
+        cost = new float[width, height];
+        flowDir = new Vector2[width, height];
     }
 
     public void Generate(Vector2Int goal, Tilemap tilemap)
@@ -22,13 +22,12 @@ public class FlowField
         this.goal = goal;
         var queue = new Queue<Vector2Int>();
 
-        // Mark walkable grid by checking Tilemap
+        // Build walkable map from tilemap: empty = walkable, tile = obstacle
         bool[,] walkable = new bool[width, height];
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
-                var cell = new Vector3Int(x, y, 0);
-                walkable[x, y] = !tilemap.HasTile(cell); // Empty = walkable
+                walkable[x, y] = !tilemap.HasTile(new Vector3Int(x, y, 0));
             }
 
         for (int x = 0; x < width; x++)
@@ -62,7 +61,7 @@ public class FlowField
             }
         }
 
-        // Compute flow field directions (lowest cost neighbor)
+        // Compute best direction for each cell (lowest cost neighbor)
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
