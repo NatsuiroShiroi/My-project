@@ -35,6 +35,9 @@ Library/ShaderCache/
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Visual Studio workspace settings
+.vsconfig
+
 # User-specific files
 *.rsuser
 *.suo
