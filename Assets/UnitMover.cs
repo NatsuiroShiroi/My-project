@@ -9,16 +9,14 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tiles per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Reference your Grid→Tilemap here")]
+    [Tooltip("Same Tilemap assigned in OrderGiver")]
     public Tilemap Tilemap;
-
-    // Shared occupancy set prevents two units stepping into the same cell
-    private static HashSet<Vector2Int> occupiedCells = new HashSet<Vector2Int>();
 
     private Rigidbody2D rb;
     private FlowField flowField;
     private Vector2Int targetCell;
     private Vector2Int lastCell;
+    private static HashSet<Vector2Int> occupied = new HashSet<Vector2Int>();
 
     void Awake()
     {
@@ -26,54 +24,79 @@ public class UnitMover : MonoBehaviour
     }
 
     /// <summary>
-    /// Called by your order‐giver to hand this unit its pathing field
+    /// Called by OrderGiver when issuing the move
     /// </summary>
-    public void SetFlowField(FlowField field, Vector2Int dest)
+    public void SetFlowField(FlowField field, Vector2Int goal)
     {
         flowField = field;
-        targetCell = dest;
+        targetCell = goal;
+        Debug.Log($"[UnitMover:{name}] Received flow field. Target = {targetCell}");
     }
 
     void FixedUpdate()
     {
-        if (flowField == null || Tilemap == null)
-            return;
+        if (flowField == null)
+            return;  // no order yet
 
-        Vector2 worldPos = rb.position;
-        Vector3Int cell3 = Tilemap.WorldToCell(worldPos);
-        var curCell = new Vector2Int(cell3.x, cell3.y);
-
-        // 1) Claim occupancy on entering a new cell
-        if (curCell != lastCell)
+        if (Tilemap == null)
         {
-            occupiedCells.Remove(lastCell);
-            if (occupiedCells.Contains(curCell))
-                return;          // someone else is here; wait
-            occupiedCells.Add(curCell);
-            lastCell = curCell;
+            Debug.LogError($"[UnitMover:{name}] Tilemap not assigned!");
+            return;
         }
 
-        // 2) If at destination, stop
-        if (curCell == targetCell)
-            return;
+        // 1) Which cell am I in?
+        Vector2 worldPos = rb.position;
+        Vector3Int c3 = Tilemap.WorldToCell(worldPos);
+        Vector2Int cur = new Vector2Int(c3.x, c3.y);
 
-        // 3) Sample flow‐field gradient
-        Vector2 dir = flowField.GetDirection(curCell);
+        // 2) Occupancy check on new cell
+        if (cur != lastCell)
+        {
+            occupied.Remove(lastCell);
+            if (occupied.Contains(cur))
+            {
+                Debug.Log($"[UnitMover:{name}] cell {cur} occupied, waiting.");
+                return;
+            }
+            occupied.Add(cur);
+            lastCell = cur;
+            Debug.Log($"[UnitMover:{name}] Entered cell {cur}");
+        }
+
+        // 3) Reached destination?
+        if (cur == targetCell)
+        {
+            Debug.Log($"[UnitMover:{name}] Reached target cell.");
+            return;
+        }
+
+        // 4) Sample flow field
+        Vector2 dir = flowField.GetDirection(cur);
         if (dir == Vector2.zero)
+        {
+            Debug.Log($"[UnitMover:{name}] No direction at cell {cur} → stuck?");
             return;
+        }
 
-        // 4) Simple local separation (diagonal dodge)
+        // 5) Local separation
         Vector2 sep = Vector2.zero;
         foreach (var hit in Physics2D.OverlapCircleAll(worldPos, 0.5f))
         {
             if (hit.attachedRigidbody != null && hit.attachedRigidbody != rb)
-                sep += (worldPos - (Vector2)hit.attachedRigidbody.position);
+                sep += worldPos - (Vector2)hit.attachedRigidbody.position;
         }
 
-        // 5) Combine steering and move
+        // 6) Compute move vector
         Vector2 move = (dir + sep.normalized * 0.7f).normalized
                        * MoveSpeed * Time.fixedDeltaTime;
+        if (move == Vector2.zero)
+        {
+            Debug.Log($"[UnitMover:{name}] Computed zero move vector.");
+            return;
+        }
 
+        // 7) Perform movement
         rb.MovePosition(worldPos + move);
+        Debug.Log($"[UnitMover:{name}] Moving {move.magnitude:F3} units towards {dir}");
     }
 }
