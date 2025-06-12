@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 public class FlowField
 {
@@ -16,10 +17,19 @@ public class FlowField
         flowDir = new Vector2[w, h];
     }
 
-    public void Generate(Vector2Int goal, bool[,] walkable)
+    public void Generate(Vector2Int goal, Tilemap tilemap)
     {
         this.goal = goal;
         var queue = new Queue<Vector2Int>();
+
+        // Mark walkable grid by checking Tilemap
+        bool[,] walkable = new bool[width, height];
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var cell = new Vector3Int(x, y, 0);
+                walkable[x, y] = !tilemap.HasTile(cell); // Empty = walkable
+            }
 
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
@@ -54,7 +64,6 @@ public class FlowField
 
         // Compute flow field directions (lowest cost neighbor)
         for (int x = 0; x < width; x++)
-        {
             for (int y = 0; y < height; y++)
             {
                 float minCost = cost[x, y];
@@ -71,7 +80,6 @@ public class FlowField
                 }
                 flowDir[x, y] = best.normalized;
             }
-        }
     }
 
     public Vector2 GetDirection(Vector2Int cell)
