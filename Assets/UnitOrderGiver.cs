@@ -8,14 +8,14 @@ public class UnitOrderGiver : MonoBehaviour
     [Tooltip("Drag your Grid→Tilemap here")]
     public Tilemap Tilemap;
 
-    [Tooltip("Select the layer your obstacle GameObjects sit on")]
+    [Tooltip("Layer of your obstacle GameObjects")]
     public LayerMask ObstacleMask;
 
     void Update()
     {
         if (Input.GetMouseButtonDown(1))
         {
-            Vector3 wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+            var wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
             wp.z = 0f;
             GiveMoveOrder(wp);
         }
@@ -23,16 +23,17 @@ public class UnitOrderGiver : MonoBehaviour
 
     void GiveMoveOrder(Vector3 worldDestination)
     {
-        // grab selected units
+        // 1) Gather selected units
         var selectors = UnitSelector.GetSelectedUnits();
         Debug.Log($"[OrderGiver] Selector found {selectors.Count} units.");
 
-        var movers = new List<UnitMover>(selectors.Count);
-        foreach (var s in selectors)
-            if (s.TryGetComponent<UnitMover>(out var m))
-                movers.Add(m);
+        // 2) Map to movers
+        var movers = new List<UnitMover>();
+        foreach (var sel in selectors)
+            if (sel.TryGetComponent<UnitMover>(out var mv))
+                movers.Add(mv);
 
-        // fallback: grab all if none selected
+        // 3) Fallback: if none selected, grab all movers
         if (movers.Count == 0)
         {
             var all = FindObjectsByType<UnitMover>(FindObjectsSortMode.None);
@@ -46,16 +47,20 @@ public class UnitOrderGiver : MonoBehaviour
 
         if (movers.Count == 0) return;
 
-        // world → cell
+        // 4) Compute goal cell
         Vector3Int c3 = Tilemap.WorldToCell(worldDestination);
         Vector2Int goal = new Vector2Int(c3.x, c3.y);
+        Debug.Log($"[OrderGiver] Goal cell = {goal}");
 
-        // build & generate flow field
+        // 5) Build & generate flow field
         var field = new FlowField(Tilemap, ObstacleMask);
         field.Generate(goal);
+        Debug.Log("[OrderGiver] FlowField generated.");
 
-        // hand it off
+        // 6) Hand it off
         foreach (var u in movers)
+        {
             u.SetFlowField(field, goal);
+        }
     }
 }
