@@ -10,27 +10,31 @@ public class FlowField
     private readonly float[,] cost;
     private readonly Vector2[,] flowDir;
     private readonly Tilemap tilemap;
+    private readonly LayerMask obstacleMask;
 
-    // 8-way movement offsets
+    // 8‐way directions
     public static readonly Vector2Int[] Dirs = {
-        new Vector2Int(1, 0),  new Vector2Int(-1, 0),
-        new Vector2Int(0, 1),  new Vector2Int(0, -1),
-        new Vector2Int(1, 1),  new Vector2Int(1, -1),
-        new Vector2Int(-1, 1), new Vector2Int(-1, -1)
+        new Vector2Int(1,0),  new Vector2Int(-1,0),
+        new Vector2Int(0,1),  new Vector2Int(0,-1),
+        new Vector2Int(1,1),  new Vector2Int(1,-1),
+        new Vector2Int(-1,1), new Vector2Int(-1,-1)
     };
-    private static readonly float[] dirCost = {
+
+    // Corresponding move costs
+    private static readonly float[] DirCost = {
         1f, 1f, 1f, 1f,
         Mathf.Sqrt(2f), Mathf.Sqrt(2f),
         Mathf.Sqrt(2f), Mathf.Sqrt(2f)
     };
 
-    public FlowField(int originX, int originY, int width, int height, Tilemap tilemap)
+    public FlowField(int originX, int originY, int width, int height, Tilemap tilemap, LayerMask obstacleMask)
     {
         this.originX = originX;
         this.originY = originY;
         this.width = width;
         this.height = height;
         this.tilemap = tilemap;
+        this.obstacleMask = obstacleMask;
 
         cost = new float[width, height];
         flowDir = new Vector2[width, height];
@@ -41,7 +45,7 @@ public class FlowField
         int gx = goal.x - originX, gy = goal.y - originY;
         if (gx < 0 || gy < 0 || gx >= width || gy >= height) return;
 
-        // Initialize all costs to infinity
+        // initialize costs
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 cost[x, y] = float.MaxValue;
@@ -50,7 +54,7 @@ public class FlowField
         cost[gx, gy] = 0f;
         pq.Enqueue(new Vector2Int(gx, gy), 0f);
 
-        // Dijkstra flood-fill
+        // Dijkstra flood‐fill
         while (pq.Count > 0)
         {
             var cur = pq.Dequeue();
@@ -62,27 +66,26 @@ public class FlowField
                 int nx = cur.x + d.x, ny = cur.y + d.y;
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
-                // world‐center of candidate
-                Vector3 center = tilemap.GetCellCenterWorld(
-                    new Vector3Int(nx + originX, ny + originY, 0));
+                var cellPos = new Vector3Int(nx + originX, ny + originY, 0);
+                Vector3 worldCenter = tilemap.GetCellCenterWorld(cellPos);
 
-                // skip if terrain blocks target cell
-                if (Physics2D.OverlapBox(center, tilemap.cellSize * 0.9f, 0f) != null)
+                // 1) Skip if that cell is a static obstacle
+                if (Physics2D.OverlapBox(worldCenter, tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
                     continue;
 
-                // ◼︎ AoE II “no corner-cut” check (only these 8 lines):
+                // 2) AoE II “no corner‐cut” for diagonal moves
                 if (d.x != 0 && d.y != 0)
                 {
                     var o1 = new Vector3Int(cur.x + d.x + originX, cur.y + originY, 0);
                     var o2 = new Vector3Int(cur.x + originX, cur.y + d.y + originY, 0);
                     Vector3 w1 = tilemap.GetCellCenterWorld(o1);
                     Vector3 w2 = tilemap.GetCellCenterWorld(o2);
-                    if (Physics2D.OverlapBox(w1, tilemap.cellSize * 0.9f, 0f) != null ||
-                        Physics2D.OverlapBox(w2, tilemap.cellSize * 0.9f, 0f) != null)
+                    if (Physics2D.OverlapBox(w1, tilemap.cellSize * 0.9f, 0f, obstacleMask) != null ||
+                        Physics2D.OverlapBox(w2, tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
                         continue;
                 }
 
-                float nc = cc + dirCost[i];
+                float nc = cc + DirCost[i];
                 if (nc < cost[nx, ny])
                 {
                     cost[nx, ny] = nc;
@@ -91,12 +94,12 @@ public class FlowField
             }
         }
 
-        // Compute flowDir from cost gradients
+        // build flowDir from the cost gradients
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
                 float best = cost[x, y];
-                Vector2 bestDir = Vector2.zero;
+                Vector2 bd = Vector2.zero;
                 foreach (var d in Dirs)
                 {
                     int nx = x + d.x, ny = y + d.y;
@@ -104,18 +107,17 @@ public class FlowField
                     if (cost[nx, ny] < best)
                     {
                         best = cost[nx, ny];
-                        bestDir = d;
+                        bd = d;
                     }
                 }
-                flowDir[x, y] = bestDir.normalized;
+                flowDir[x, y] = bd.normalized;
             }
     }
 
     public Vector2 GetDirection(Vector2Int cell)
     {
         int rx = cell.x - originX, ry = cell.y - originY;
-        if (rx < 0 || ry < 0 || rx >= width || ry >= height)
-            return Vector2.zero;
+        if (rx < 0 || ry < 0 || rx >= width || ry >= height) return Vector2.zero;
         return flowDir[rx, ry];
     }
 
@@ -126,13 +128,12 @@ public class FlowField
     }
 
     /// <summary>
-    /// Back-trace a static cell-to-cell path from start to goal.
+    /// Backtrace a static path from start→goal using the cost field.
     /// </summary>
     public List<Vector2Int> GetPath(Vector2Int start, Vector2Int goal)
     {
         var path = new List<Vector2Int>();
-        if (!IsCellInBounds(start) || !IsCellInBounds(goal))
-            return path;
+        if (!IsCellInBounds(start) || !IsCellInBounds(goal)) return path;
 
         Vector2Int cur = start;
         path.Add(cur);
