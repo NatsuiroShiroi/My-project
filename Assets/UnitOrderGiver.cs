@@ -10,8 +10,8 @@ public class UnitOrderGiver : MonoBehaviour
     private readonly Vector2Int[] neighborDirs = {
         Vector2Int.right, Vector2Int.left,
         Vector2Int.up,    Vector2Int.down,
-        new Vector2Int(1, 1),   new Vector2Int( 1, -1),
-        new Vector2Int(-1, 1),  new Vector2Int(-1, -1)
+        new Vector2Int(1,1), new Vector2Int(1,-1),
+        new Vector2Int(-1,1),new Vector2Int(-1,-1)
     };
 
     void Awake()
@@ -33,7 +33,7 @@ public class UnitOrderGiver : MonoBehaviour
     {
         if (Input.GetMouseButtonDown(1))
         {
-            Vector3 wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+            var wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
             wp.z = 0f;
             IssueMoveOrder(wp);
         }
@@ -43,10 +43,8 @@ public class UnitOrderGiver : MonoBehaviour
     {
         if (tilemap == null || groundSprite == null) return;
 
-        // 0) Clear old occupancy & any lingering flow fields
         UnitMover.ClearReservations();
 
-        // 1) Gather selected movers (fallback to all)
         var sels = UnitSelector.GetSelectedUnits();
         var movers = new List<UnitMover>();
         foreach (var s in sels)
@@ -56,72 +54,50 @@ public class UnitOrderGiver : MonoBehaviour
             movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
         if (movers.Count == 0) return;
 
-        // 2) Reset every mover’s flow field (so unassigned ones stop)
-        foreach (var m in movers)
-            m.SetFlowField(null, default);
-
-        // 3) Compute ground bounds in cell-space
-        Bounds b = groundSprite.bounds;
+        var b = groundSprite.bounds;
         Vector3Int minC = tilemap.WorldToCell(b.min);
         Vector3Int maxC = tilemap.WorldToCell(b.max);
-        int minX = minC.x, minY = minC.y;
-        int maxX = maxC.x, maxY = maxC.y;
+        int minX = minC.x, minY = minC.y, maxX = maxC.x, maxY = maxC.y;
 
-        // 4) Clamp clicked destination
-        var clickCell3 = tilemap.WorldToCell(worldDest);
-        int gx = Mathf.Clamp(clickCell3.x, minX, maxX);
-        int gy = Mathf.Clamp(clickCell3.y, minY, maxY);
+        var click3 = tilemap.WorldToCell(worldDest);
+        int gx = Mathf.Clamp(click3.x, minX, maxX);
+        int gy = Mathf.Clamp(click3.y, minY, maxY);
         Vector2Int baseGoal = new Vector2Int(gx, gy);
 
-        // 5) Prepare per-unit assignments
         var assigned = new HashSet<Vector2Int>();
-        var assignments = new List<(UnitMover unit, Vector2Int goal)>();
+        var assigns = new List<(UnitMover, Vector2Int)>();
 
-        // First unit → exact click
+        // first unit → clicked cell
         assigned.Add(baseGoal);
-        assignments.Add((movers[0], baseGoal));
+        assigns.Add((movers[0], baseGoal));
 
-        // Others → nearest free neighbor
+        // others → nearest neighbor
         for (int i = 1; i < movers.Count; i++)
         {
             float bestDist = float.MaxValue;
-            Vector2Int bestCell = default;
+            Vector2Int best = baseGoal;
             foreach (var d in neighborDirs)
             {
                 var cand = baseGoal + d;
-                // must lie within ground
-                if (cand.x < minX || cand.x > maxX || cand.y < minY || cand.y > maxY)
-                    continue;
-                // skip if already assigned
-                if (assigned.Contains(cand))
-                    continue;
-                // skip if obstacle
-                Vector3Int c3 = new Vector3Int(cand.x, cand.y, 0);
-                Vector3 worldC = tilemap.GetCellCenterWorld(c3);
-                if (Physics2D.OverlapBox(worldC, tilemap.cellSize * 0.9f, 0f) != null)
-                    continue;
-                // pick nearest to baseGoal
+                if (cand.x < minX || cand.x > maxX || cand.y < minY || cand.y > maxY) continue;
+                if (assigned.Contains(cand)) continue;
+                Vector3 center = tilemap.GetCellCenterWorld(new Vector3Int(cand.x, cand.y, 0));
+                if (Physics2D.OverlapBox(center, tilemap.cellSize * 0.9f, 0f) != null) continue;
                 float dist = (cand - baseGoal).sqrMagnitude;
-                if (dist < bestDist)
-                {
-                    bestDist = dist;
-                    bestCell = cand;
-                }
+                if (dist < bestDist) { bestDist = dist; best = cand; }
             }
-            // only assign if we found a neighbor
             if (bestDist < float.MaxValue)
             {
-                assigned.Add(bestCell);
-                assignments.Add((movers[i], bestCell));
+                assigned.Add(best);
+                assigns.Add((movers[i], best));
             }
         }
 
-        // 6) Issue each assignment with its own flow field
         int width = maxX - minX + 1;
         int height = maxY - minY + 1;
-        for (int i = 0; i < assignments.Count; i++)
+
+        foreach (var (unit, goal) in assigns)
         {
-            var (unit, goal) = assignments[i];
             var field = new FlowField(minX, minY, width, height, tilemap);
             field.Generate(goal);
             unit.SetFlowField(field, goal);
