@@ -16,7 +16,6 @@ public class UnitMover : MonoBehaviour
     private FlowField flowField;
     private Vector2Int goalCell;
 
-    // Track last, current, and next reserved cells
     private Vector2Int lastCell, currentCell, nextCell;
     private static HashSet<Vector2Int> occupied = new HashSet<Vector2Int>();
 
@@ -40,7 +39,6 @@ public class UnitMover : MonoBehaviour
     {
         if (field == null)
         {
-            // Cancel any ongoing movement
             flowField = null;
             return;
         }
@@ -48,7 +46,7 @@ public class UnitMover : MonoBehaviour
         flowField = field;
         goalCell = goal;
 
-        // Initialize cell tracking and reserve starting cell
+        // Initialize tracking & reserve start
         Vector3Int c3 = tilemap.WorldToCell(rb.position);
         currentCell = new Vector2Int(c3.x, c3.y);
         lastCell = currentCell;
@@ -61,35 +59,30 @@ public class UnitMover : MonoBehaviour
         if (flowField == null || tilemap == null)
             return;
 
-        // 1) If reached goal, snap to its center exactly and stop
+        // 1) If at goal: snap, cancel
         if (currentCell == goalCell)
         {
-            Vector3 exact3 = tilemap.GetCellCenterWorld(new Vector3Int(goalCell.x, goalCell.y, 0));
-            rb.MovePosition(new Vector2(exact3.x, exact3.y));
+            Vector3 ex3 = tilemap.GetCellCenterWorld(new Vector3Int(goalCell.x, goalCell.y, 0));
+            rb.MovePosition(new Vector2(ex3.x, ex3.y));
             flowField = null;
             return;
         }
 
-        // 2) When at nextCell center, advance and free the last reservation
-        Vector3 nextCtr3 = tilemap.GetCellCenterWorld(new Vector3Int(nextCell.x, nextCell.y, 0));
-        Vector2 nextCtr2 = new Vector2(nextCtr3.x, nextCtr3.y);
-        if ((rb.position - nextCtr2).sqrMagnitude < 0.001f)
+        // 2) Arrived at nextCell? free last & advance
+        Vector3 nc3 = tilemap.GetCellCenterWorld(new Vector3Int(nextCell.x, nextCell.y, 0));
+        Vector2 nc2 = new Vector2(nc3.x, nc3.y);
+        if ((rb.position - nc2).sqrMagnitude < 0.001f)
         {
             occupied.Remove(lastCell);
             lastCell = currentCell;
             currentCell = nextCell;
         }
 
-        // 3) If need a new nextCell, pick best neighbor
+        // 3) If need new nextCell:
         if (nextCell == currentCell)
         {
             Vector2 dir = flowField.GetDirection(currentCell);
-            if (dir == Vector2.zero)
-            {
-                // No valid path: cancel
-                flowField = null;
-                return;
-            }
+            if (dir == Vector2.zero) { flowField = null; return; }
 
             float bestScore = float.NegativeInfinity;
             Vector2Int bestCell = currentCell;
@@ -97,34 +90,31 @@ public class UnitMover : MonoBehaviour
             foreach (var d in new[]{
                 Vector2Int.right, Vector2Int.left,
                 Vector2Int.up,    Vector2Int.down,
-                new Vector2Int(1, 1),   new Vector2Int(1, -1),
-                new Vector2Int(-1, 1),  new Vector2Int(-1, -1)
+                new Vector2Int(1,1), new Vector2Int(1,-1),
+                new Vector2Int(-1,1),new Vector2Int(-1,-1)
             })
             {
-                Vector2Int cand = currentCell + d;
+                var cand = currentCell + d;
+                // bounds
+                if (!flowField.IsCellInBounds(cand)) continue;
 
-                // Terrain blocking
-                Vector3Int cand3 = new Vector3Int(cand.x, cand.y, 0);
-                Vector3 ctr3 = tilemap.GetCellCenterWorld(cand3);
+                // terrain
+                Vector3 ctr3 = tilemap.GetCellCenterWorld(new Vector3Int(cand.x, cand.y, 0));
                 bool blocked = Physics2D.OverlapBox(ctr3, tilemap.cellSize * 0.9f, 0f) != null;
 
-                // Prevent diagonal corner-cutting
+                // diagonal corner‐cut prevention
                 if (!blocked && d.x != 0 && d.y != 0)
                 {
-                    var adj1 = new Vector3Int(currentCell.x + d.x, currentCell.y, 0);
-                    var adj2 = new Vector3Int(currentCell.x, currentCell.y + d.y, 0);
-                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(adj1), tilemap.cellSize * 0.9f, 0f) != null ||
-                        Physics2D.OverlapBox(tilemap.GetCellCenterWorld(adj2), tilemap.cellSize * 0.9f, 0f) != null)
-                    {
+                    var a1 = new Vector3Int(currentCell.x + d.x, currentCell.y, 0);
+                    var a2 = new Vector3Int(currentCell.x, currentCell.y + d.y, 0);
+                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a1), tilemap.cellSize * 0.9f, 0f) != null
+                     || Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a2), tilemap.cellSize * 0.9f, 0f) != null)
                         blocked = true;
-                    }
                 }
 
-                if (blocked || occupied.Contains(cand))
-                    continue;
+                if (blocked || occupied.Contains(cand)) continue;
 
-                Vector2 d2 = new Vector2(d.x, d.y).normalized;
-                float score = Vector2.Dot(d2, dir);
+                float score = Vector2.Dot(new Vector2(d.x, d.y).normalized, dir);
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -132,27 +122,18 @@ public class UnitMover : MonoBehaviour
                 }
             }
 
-            // If no progress, cancel movement
-            if (bestCell == currentCell)
-            {
-                flowField = null;
-                return;
-            }
+            if (bestCell == currentCell) { flowField = null; return; }
 
-            // Reserve and set nextCell
             occupied.Add(bestCell);
             nextCell = bestCell;
         }
 
         // 4) Move toward nextCell center
-        Vector3 tgt3 = tilemap.GetCellCenterWorld(new Vector3Int(nextCell.x, nextCell.y, 0));
-        Vector2 tgt2 = new Vector2(tgt3.x, tgt3.y);
-        Vector2 delta = tgt2 - rb.position;
+        Vector3 t3 = tilemap.GetCellCenterWorld(new Vector3Int(nextCell.x, nextCell.y, 0));
+        Vector2 t2 = new Vector2(t3.x, t3.y);
+        Vector2 delta = t2 - rb.position;
         float step = MoveSpeed * Time.fixedDeltaTime;
 
-        if (delta.magnitude <= step)
-            rb.MovePosition(tgt2);
-        else
-            rb.MovePosition(rb.position + delta.normalized * step);
+        rb.MovePosition(rb.position + delta.normalized * Mathf.Min(step, delta.magnitude));
     }
 }
