@@ -1,22 +1,31 @@
-﻿public Tilemap Tilemap; // assigned in Inspector
+﻿using UnityEngine;
+using UnityEngine.Tilemaps;
+using System.Collections.Generic;
 
-public void GiveMoveOrder(Vector2 destination)
+public class UnitOrderGiver : MonoBehaviour
 {
-    // Convert world destination to grid cell
-    Vector3Int cell = Tilemap.WorldToCell(destination);
-    Vector2Int gridCell = new Vector2Int(cell.x, cell.y);
+    public Tilemap Tilemap; // Assigned in Inspector
 
-    // Calculate map size based on Tilemap bounds (can adjust as needed)
-    int width = Tilemap.size.x;
-    int height = Tilemap.size.y;
+    public List<UnitMover> SelectedUnits = new List<UnitMover>();
 
-    // Generate flow field
-    FlowField field = new FlowField(width, height);
-    field.Generate(gridCell, Tilemap);
-
-    // Assign flow field to all selected units
-    foreach (var unit in FindObjectsOfType<UnitMover>()) // or your selection logic
+    public void GiveMoveOrder(Vector2 destination)
     {
-        unit.SetFlowField(field, gridCell);
+        // Convert destination to grid cell
+        Vector3Int cell = Tilemap.WorldToCell(destination);
+        Vector2Int gridCell = new Vector2Int(cell.x, cell.y);
+
+        // Get map size (adjust as needed)
+        int width = Tilemap.size.x;
+        int height = Tilemap.size.y;
+
+        // Generate flow field
+        FlowField field = new FlowField(width, height);
+        field.Generate(gridCell, Tilemap);
+
+        // Assign to each unit
+        foreach (var unit in SelectedUnits)
+        {
+            unit.SetFlowField(field, gridCell);
+        }
     }
 }
