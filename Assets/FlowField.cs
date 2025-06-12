@@ -25,10 +25,11 @@ public class FlowField
 
     public FlowField(int originX, int originY, int width, int height, Tilemap tilemap)
     {
-        this.originX = originX; this.originY = originY;
-        this.width = width; this.height = height;
+        this.originX = originX;
+        this.originY = originY;
+        this.width = width;
+        this.height = height;
         this.tilemap = tilemap;
-
         cost = new float[width, height];
         flowDir = new Vector2[width, height];
     }
@@ -38,7 +39,6 @@ public class FlowField
         int gx = goal.x - originX, gy = goal.y - originY;
         if (gx < 0 || gy < 0 || gx >= width || gy >= height) return;
 
-        // Initialize costs
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 cost[x, y] = float.MaxValue;
@@ -47,7 +47,6 @@ public class FlowField
         cost[gx, gy] = 0f;
         pq.Enqueue(new Vector2Int(gx, gy), 0f);
 
-        // Dijkstra flood-fill
         while (pq.Count > 0)
         {
             var cur = pq.Dequeue();
@@ -58,8 +57,9 @@ public class FlowField
                 int nx = cur.x + d.x, ny = cur.y + d.y;
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
-                // terrain collider check
-                var world = tilemap.GetCellCenterWorld(new Vector3Int(nx + originX, ny + originY, 0));
+                // terrain collision
+                var world = tilemap.GetCellCenterWorld(
+                    new Vector3Int(nx + originX, ny + originY, 0));
                 if (Physics2D.OverlapBox(world, tilemap.cellSize * 0.9f, 0f) != null)
                     continue;
 
@@ -72,7 +72,6 @@ public class FlowField
             }
         }
 
-        // Compute best‐neighbor flowDir
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
@@ -93,18 +92,19 @@ public class FlowField
             }
     }
 
-    // Expose the raw cost for neighbor sorting
     public float GetCost(Vector2Int cell)
     {
         int rx = cell.x - originX, ry = cell.y - originY;
-        if (rx < 0 || ry < 0 || rx >= width || ry >= height) return float.MaxValue;
+        if (rx < 0 || ry < 0 || rx >= width || ry >= height)
+            return float.MaxValue;
         return cost[rx, ry];
     }
 
     public Vector2 GetDirection(Vector2Int cell)
     {
         int rx = cell.x - originX, ry = cell.y - originY;
-        if (rx < 0 || ry < 0 || rx >= width || ry >= height) return Vector2.zero;
+        if (rx < 0 || ry < 0 || rx >= width || ry >= height)
+            return Vector2.zero;
         return flowDir[rx, ry];
     }
 
