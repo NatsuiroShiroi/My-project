@@ -9,89 +9,88 @@ public class FlowField
     private readonly float[,] cost;
     private readonly Vector2[,] flowDir;
     private readonly Tilemap tilemap;
-    private readonly LayerMask obstacleMask;
 
-    public FlowField(int originX, int originY, int width, int height, Tilemap tilemap, LayerMask obstacleMask)
+    public FlowField(Tilemap tilemap)
     {
-        this.originX = originX;
-        this.originY = originY;
-        this.width = width;
-        this.height = height;
         this.tilemap = tilemap;
-        this.obstacleMask = obstacleMask;
+        var b = tilemap.cellBounds;
+        originX = b.xMin;
+        originY = b.yMin;
+        width = b.size.x;
+        height = b.size.y;
 
         cost = new float[width, height];
         flowDir = new Vector2[width, height];
 
-        Debug.Log($"[FlowField] Grid origin=({originX},{originY}), size=({width},{height})");
+        Debug.Log($"[FlowField] auto-sized grid: origin=({originX},{originY}), size=({width},{height})");
     }
 
     /// <summary>
-    /// goal is in world‐cell coords (tilemap Grid cell coordinates).
+    /// goal is in tilemap (grid) coordinates
     /// </summary>
     public void Generate(Vector2Int goal)
     {
-        int gx = goal.x - originX, gy = goal.y - originY;
+        int gx = goal.x - originX;
+        int gy = goal.y - originY;
+
         if (gx < 0 || gy < 0 || gx >= width || gy >= height)
         {
-            Debug.LogWarning($"[FlowField] Goal {goal} outside grid!");
+            Debug.LogWarning($"[FlowField] goal {goal} outside auto-bounds");
             return;
         }
 
-        // 1) Build walkable mask & init cost
+        // 1) compute walkable & init costs
         bool[,] walkable = new bool[width, height];
         for (int x = 0; x < width; x++)
+        {
             for (int y = 0; y < height; y++)
             {
-                Vector3 worldCenter = tilemap.CellToWorld(
-                    new Vector3Int(x + originX, y + originY, 0)
-                ) + tilemap.cellSize * 0.5f;
+                // center of this cell in world space
+                var cell = new Vector3Int(x + originX, y + originY, 0);
+                Vector3 center = tilemap.CellToWorld(cell) + tilemap.cellSize * 0.5f;
 
-                bool blocked = Physics2D.OverlapBox(
-                    worldCenter,
-                    tilemap.cellSize,
-                    0f,
-                    obstacleMask
-                ) != null;
-
+                // any collider at this cell blocks movement
+                bool blocked = Physics2D.OverlapBox(center, tilemap.cellSize, 0f) != null;
                 walkable[x, y] = !blocked;
                 cost[x, y] = float.MaxValue;
             }
+        }
 
-        // 2) Flood-fill (Dijkstra) from goal
-        var queue = new Queue<Vector2Int>();
+        // 2) flood-fill from goal (Dijkstra)
+        var q = new Queue<Vector2Int>();
         cost[gx, gy] = 0f;
-        queue.Enqueue(new Vector2Int(gx, gy));
+        q.Enqueue(new Vector2Int(gx, gy));
 
         var dirs = new Vector2Int[] {
             new Vector2Int(1,0), new Vector2Int(-1,0),
             new Vector2Int(0,1), new Vector2Int(0,-1)
         };
 
-        while (queue.Count > 0)
+        while (q.Count > 0)
         {
-            var cur = queue.Dequeue();
-            float cCost = cost[cur.x, cur.y];
+            var c = q.Dequeue();
+            float cc = cost[c.x, c.y];
             foreach (var d in dirs)
             {
-                int nx = cur.x + d.x, ny = cur.y + d.y;
+                int nx = c.x + d.x, ny = c.y + d.y;
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
                 if (!walkable[nx, ny]) continue;
-                float nc = cCost + 1f;
+                float nc = cc + 1f;
                 if (nc < cost[nx, ny])
                 {
                     cost[nx, ny] = nc;
-                    queue.Enqueue(new Vector2Int(nx, ny));
+                    q.Enqueue(new Vector2Int(nx, ny));
                 }
             }
         }
 
-        // 3) Compute flowDir per cell
+        // 3) compute direction per cell
         for (int x = 0; x < width; x++)
+        {
             for (int y = 0; y < height; y++)
             {
                 float best = cost[x, y];
-                Vector2 v = Vector2.zero;
+                Vector2 dir = Vector2.zero;
                 foreach (var d in dirs)
                 {
                     int nx = x + d.x, ny = y + d.y;
@@ -99,21 +98,23 @@ public class FlowField
                     if (cost[nx, ny] < best)
                     {
                         best = cost[nx, ny];
-                        v = d;
+                        dir = d;
                     }
                 }
-                flowDir[x, y] = v.normalized;
+                flowDir[x, y] = dir.normalized;
             }
+        }
 
-        Debug.Log("[FlowField] Generation complete.");
+        Debug.Log("[FlowField] generation complete");
     }
 
     /// <summary>
-    /// cell in world‐cell coords → local flowDir
+    /// cell in grid coords → returns flow vector (world movement)
     /// </summary>
     public Vector2 GetDirection(Vector2Int cell)
     {
-        int rx = cell.x - originX, ry = cell.y - originY;
+        int rx = cell.x - originX;
+        int ry = cell.y - originY;
         if (rx < 0 || ry < 0 || rx >= width || ry >= height)
             return Vector2.zero;
         return flowDir[rx, ry];
