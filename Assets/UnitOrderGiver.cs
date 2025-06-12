@@ -8,18 +8,20 @@ public class UnitOrderGiver : MonoBehaviour
     private Tilemap tilemap;
     private SpriteRenderer groundSprite;
     private static readonly Vector2Int[] neighborDirs = {
-        new Vector2Int(1,0), new Vector2Int(-1,0),
-        new Vector2Int(0,1), new Vector2Int(0,-1),
-        new Vector2Int(1,1), new Vector2Int(1,-1),
-        new Vector2Int(-1,1),new Vector2Int(-1,-1)
+        new Vector2Int(1,0),  new Vector2Int(-1,0),
+        new Vector2Int(0,1),  new Vector2Int(0,-1),
+        new Vector2Int(1,1),  new Vector2Int(1,-1),
+        new Vector2Int(-1,1), new Vector2Int(-1,-1)
     };
 
     void Awake()
     {
-        var g = GameObject.Find("Grid");
-        if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
-        var gr = GameObject.Find("Ground");
-        if (gr != null) groundSprite = gr.GetComponent<SpriteRenderer>();
+        var gridGO = GameObject.Find("Grid");
+        if (gridGO != null)
+            tilemap = gridGO.GetComponentInChildren<Tilemap>();
+        var groundGO = GameObject.Find("Ground");
+        if (groundGO != null)
+            groundSprite = groundGO.GetComponent<SpriteRenderer>();
     }
 
     void Update()
@@ -27,7 +29,7 @@ public class UnitOrderGiver : MonoBehaviour
         if (Input.GetMouseButtonDown(1))
         {
             var wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-            wp.z = 0;
+            wp.z = 0f;
             IssueMoveOrder(wp);
         }
     }
@@ -36,8 +38,10 @@ public class UnitOrderGiver : MonoBehaviour
     {
         if (tilemap == null || groundSprite == null) return;
 
+        // Clear prior reservations
         UnitMover.ClearReservations();
 
+        // Gather units
         var sels = UnitSelector.GetSelectedUnits();
         var movers = new List<UnitMover>();
         foreach (var s in sels)
@@ -47,25 +51,25 @@ public class UnitOrderGiver : MonoBehaviour
             movers.AddRange(FindObjectsByType<UnitMover>(FindObjectsSortMode.None));
         if (movers.Count == 0) return;
 
-        var b = groundSprite.bounds;
-        var minC = tilemap.WorldToCell(b.min);
-        var maxC = tilemap.WorldToCell(b.max);
+        // Ground bounds in cell space
+        Bounds b = groundSprite.bounds;
+        Vector3Int minC = tilemap.WorldToCell(b.min);
+        Vector3Int maxC = tilemap.WorldToCell(b.max);
         int minX = minC.x, minY = minC.y, maxX = maxC.x, maxY = maxC.y;
 
-        var c3 = tilemap.WorldToCell(worldDest);
-        var baseGoal = new Vector2Int(
+        // Clamp click
+        Vector3Int c3 = tilemap.WorldToCell(worldDest);
+        Vector2Int baseGoal = new Vector2Int(
             Mathf.Clamp(c3.x, minX, maxX),
             Mathf.Clamp(c3.y, minY, maxY)
         );
 
-        var assigned = new HashSet<Vector2Int>();
-        var assigns = new List<(UnitMover, Vector2Int)>();
+        // Assign distinct targets
+        var assigned = new HashSet<Vector2Int> { baseGoal };
+        var assignments = new List<(UnitMover, Vector2Int)> {
+            (movers[0], baseGoal)
+        };
 
-        // first unit => click
-        assigned.Add(baseGoal);
-        assigns.Add((movers[0], baseGoal));
-
-        // others => nearest neighbor
         for (int i = 1; i < movers.Count; i++)
         {
             float bestDist = float.MaxValue;
@@ -75,20 +79,23 @@ public class UnitOrderGiver : MonoBehaviour
                 var cand = baseGoal + d;
                 if (cand.x < minX || cand.x > maxX || cand.y < minY || cand.y > maxY) continue;
                 if (assigned.Contains(cand)) continue;
-                var ctr = tilemap.GetCellCenterWorld(new Vector3Int(cand.x, cand.y, 0));
-                if (Physics2D.OverlapBox(ctr, tilemap.cellSize * 0.9f, 0f) != null) continue;
+                var cent = tilemap.GetCellCenterWorld(new Vector3Int(cand.x, cand.y, 0));
+                if (Physics2D.OverlapBox(cent, tilemap.cellSize * 0.9f, 0f) != null) continue;
                 float dist = (cand - baseGoal).sqrMagnitude;
                 if (dist < bestDist) { bestDist = dist; best = cand; }
             }
             if (bestDist < float.MaxValue)
             {
                 assigned.Add(best);
-                assigns.Add((movers[i], best));
+                assignments.Add((movers[i], best));
             }
         }
 
-        int width = maxX - minX + 1, height = maxY - minY + 1;
-        foreach (var (unit, goal) in assigns)
+        int width = maxX - minX + 1;
+        int height = maxY - minY + 1;
+
+        // Create individual flow fields
+        foreach (var (unit, goal) in assignments)
         {
             var field = new FlowField(minX, minY, width, height, tilemap);
             field.Generate(goal);
