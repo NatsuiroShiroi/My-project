@@ -9,14 +9,12 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tiles per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Tilemap for world↔cell conversions (optional)")]
+    [Tooltip("Tilemap for cell↔world conversions (auto-found if blank)")]
     public Tilemap tilemap;
 
     private Rigidbody2D rb;
-    private FlowField flowField;
-    private Vector2Int goalCell;
-    private Vector2Int lastCell, currentCell, nextCell;
-    private static HashSet<Vector2Int> occupied = new HashSet<Vector2Int>();
+    private List<Vector2Int> path;
+    private int pathIndex;
     private bool isMoving = false;
 
     void Awake()
@@ -25,124 +23,71 @@ public class UnitMover : MonoBehaviour
         if (tilemap == null)
         {
             var g = GameObject.Find("Grid");
-            if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
+            if (g != null)
+                tilemap = g.GetComponentInChildren<Tilemap>();
         }
         if (tilemap == null)
             Debug.LogError($"[UnitMover:{name}] Tilemap not assigned!");
     }
 
-    public static void ClearReservations() => occupied.Clear();
-
-    public void SetFlowField(FlowField field, Vector2Int goal)
+    /// <summary>Called for each unit: sets up its static path.</summary>
+    public void SetPath(List<Vector2Int> newPath)
     {
-        if (field == null)
+        if (newPath == null || newPath.Count < 2)
         {
             isMoving = false;
             return;
         }
-        if (tilemap == null) return;
-
-        flowField = field;
-        goalCell = goal;
+        path = newPath;
+        pathIndex = 1;  // we start moving toward path[1]
         isMoving = true;
-
-        var c3 = tilemap.WorldToCell(rb.position);
-        currentCell = new Vector2Int(c3.x, c3.y);
-        lastCell = currentCell;
-        nextCell = currentCell;
-        occupied.Add(currentCell);
     }
 
     void FixedUpdate()
     {
-        if (!isMoving || tilemap == null || flowField == null)
-            return;
+        if (!isMoving || tilemap == null) return;
 
-        // Snap & stop if at goal
-        if (currentCell == goalCell)
+        // 1) If we've reached the final cell, snap & stop
+        if (pathIndex >= path.Count)
         {
-            var ex = tilemap.GetCellCenterWorld(
-                new Vector3Int(goalCell.x, goalCell.y, 0));
-            rb.MovePosition(new Vector2(ex.x, ex.y));
+            var end = path[path.Count - 1];
+            var ex3 = tilemap.GetCellCenterWorld(new Vector3Int(end.x, end.y, 0));
+            rb.MovePosition(new Vector2(ex3.x, ex3.y));
             isMoving = false;
             return;
         }
 
-        // Only free when we've actually moved into a new cell
-        if (nextCell != currentCell)
+        // 2) Target the next waypoint
+        var cell = path[pathIndex];
+        var target3 = tilemap.GetCellCenterWorld(new Vector3Int(cell.x, cell.y, 0));
+        Vector2 target2 = new Vector2(target3.x, target3.y);
+        Vector2 toTarget = target2 - rb.position;
+
+        // 3) Compute simple separation from nearby units
+        Vector2 sep = Vector2.zero;
+        var hits = Physics2D.OverlapCircleAll(rb.position, 0.5f);
+        foreach (var hit in hits)
         {
-            var center3 = tilemap.GetCellCenterWorld(
-                new Vector3Int(nextCell.x, nextCell.y, 0));
-            var center2 = new Vector2(center3.x, center3.y);
-            if ((rb.position - center2).sqrMagnitude < 0.001f)
+            if (hit.attachedRigidbody != null && hit.attachedRigidbody != rb)
             {
-                occupied.Remove(currentCell);
-                lastCell = currentCell;
-                currentCell = nextCell;
+                Vector2 away = rb.position - (Vector2)hit.attachedRigidbody.position;
+                sep += away.normalized / (away.magnitude + 0.1f);
             }
         }
 
-        // Pick nextCell if needed
-        if (nextCell == currentCell)
-        {
-            // gather valid neighbors with cost
-            var neigh = new List<(Vector2Int d, float c)>();
-            foreach (var d in FlowField.Dirs)
-            {
-                var cand = currentCell + d;
-                if (!flowField.IsCellInBounds(cand)) continue;
+        // 4) Combine heading + separation
+        Vector2 desired = (toTarget.normalized + sep * 0.5f).normalized;
 
-                // terrain block
-                var ctr3 = tilemap.GetCellCenterWorld(
-                    new Vector3Int(cand.x, cand.y, 0));
-                if (Physics2D.OverlapBox(ctr3, tilemap.cellSize * 0.9f, 0f) != null)
-                    continue;
-
-                // corner cut prevention
-                if (d.x != 0 && d.y != 0)
-                {
-                    var a1 = new Vector3Int(currentCell.x + d.x, currentCell.y, 0);
-                    var a2 = new Vector3Int(currentCell.x, currentCell.y + d.y, 0);
-                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a1),
-                        tilemap.cellSize * 0.9f, 0f) != null ||
-                        Physics2D.OverlapBox(tilemap.GetCellCenterWorld(a2),
-                        tilemap.cellSize * 0.9f, 0f) != null)
-                        continue;
-                }
-
-                neigh.Add((d, flowField.GetCost(cand)));
-            }
-
-            neigh.Sort((a, b) => a.c.CompareTo(b.c));
-
-            Vector2Int chosen = currentCell;
-            foreach (var (d, _) in neigh)
-            {
-                var cand = currentCell + d;
-                if (!occupied.Contains(cand))
-                {
-                    chosen = cand;
-                    break;
-                }
-            }
-
-            if (chosen == currentCell)
-            {
-                isMoving = false;
-                return;
-            }
-
-            occupied.Add(chosen);
-            nextCell = chosen;
-        }
-
-        // Move toward nextCell
-        var t3 = tilemap.GetCellCenterWorld(
-            new Vector3Int(nextCell.x, nextCell.y, 0));
-        var t2 = new Vector2(t3.x, t3.y);
-        var delta = t2 - rb.position;
+        // 5) Step, and if we reach the waypoint this frame, advance index
         float step = MoveSpeed * Time.fixedDeltaTime;
-
-        rb.MovePosition(rb.position + delta.normalized * Mathf.Min(step, delta.magnitude));
+        if (toTarget.magnitude <= step)
+        {
+            rb.MovePosition(target2);
+            pathIndex++;
+        }
+        else
+        {
+            rb.MovePosition(rb.position + desired * step);
+        }
     }
 }
