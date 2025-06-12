@@ -15,14 +15,14 @@ public class UnitOrderGiver : MonoBehaviour
         if (gridGO != null)
             tilemap = gridGO.GetComponentInChildren<Tilemap>();
         if (tilemap == null)
-            Debug.LogError("[OrderGiver] Could not find Grid→Tilemap!");
+            Debug.LogError("[OrderGiver] Grid→Tilemap not found!");
 
-        // Auto-find Ground sprite
+        // Auto-find Ground → SpriteRenderer
         var groundGO = GameObject.Find("Ground");
         if (groundGO != null)
             groundSprite = groundGO.GetComponent<SpriteRenderer>();
         if (groundSprite == null)
-            Debug.LogError("[OrderGiver] Could not find Ground→SpriteRenderer!");
+            Debug.LogError("[OrderGiver] Ground→SpriteRenderer not found!");
     }
 
     void Update()
@@ -35,55 +35,52 @@ public class UnitOrderGiver : MonoBehaviour
         }
     }
 
-    void IssueMoveOrder(Vector3 worldDest)
+    private void IssueMoveOrder(Vector3 worldDest)
     {
         if (tilemap == null || groundSprite == null)
             return;
 
-        // 1) Gather selected units ONLY
-        var selectors = UnitSelector.GetSelectedUnits();
-        if (selectors.Count == 0)
-            return;                           // <-- early return if none selected
+        // 1) Only act if units are selected:
+        var sels = UnitSelector.GetSelectedUnits();
+        if (sels.Count == 0)
+            return;
 
+        // 2) Collect their UnitMover components:
         var movers = new List<UnitMover>();
-        foreach (var sel in selectors)
-            if (sel.TryGetComponent<UnitMover>(out var mv))
+        foreach (var go in sels)
+            if (go.TryGetComponent(out UnitMover mv))
                 movers.Add(mv);
-
         if (movers.Count == 0)
-            return;                           // no valid UnitMover on selected objects
+            return;
 
-        // 2) Compute ground cell bounds (inset half-cell)
+        // 3) Compute playable bounds inset half a cell:
         Bounds bs = groundSprite.bounds;
         Vector3 half = tilemap.cellSize * 0.5f;
-        Vector3 worldMin = bs.min + half;
-        Vector3 worldMax = bs.max - half;
-        Vector3Int minC = tilemap.WorldToCell(worldMin);
-        Vector3Int maxC = tilemap.WorldToCell(worldMax);
+        Vector3 minW = bs.min + half, maxW = bs.max - half;
+        Vector3Int minC = tilemap.WorldToCell(minW);
+        Vector3Int maxC = tilemap.WorldToCell(maxW);
 
-        // 3) Clamp click inside ground
+        // 4) Clamp click inside:
         Vector3Int clickC = tilemap.WorldToCell(worldDest);
         Vector2Int baseGoal = new Vector2Int(
             Mathf.Clamp(clickC.x, minC.x, maxC.x),
             Mathf.Clamp(clickC.y, minC.y, maxC.y)
         );
 
-        // 4) BFS to pick distinct goal cells
+        // 5) BFS to pick one free goal per mover:
         var goals = new List<Vector2Int>();
         var seen = new HashSet<Vector2Int>();
-        var queue = new Queue<Vector2Int>();
-        queue.Enqueue(baseGoal);
+        var q = new Queue<Vector2Int>();
+        q.Enqueue(baseGoal);
         seen.Add(baseGoal);
 
-        while (goals.Count < movers.Count && queue.Count > 0)
+        while (goals.Count < movers.Count && q.Count > 0)
         {
-            var cur = queue.Dequeue();
-
+            var cur = q.Dequeue();
             // skip if terrain blocks this cell
-            Vector3 ctrWorld = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
-            if (Physics2D.OverlapBox(ctrWorld, tilemap.cellSize * 0.9f, 0f) == null)
+            Vector3 ctr = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
+            if (Physics2D.OverlapBox(ctr, tilemap.cellSize * 0.9f, 0f) == null)
                 goals.Add(cur);
-
             // enqueue neighbors
             foreach (var d in FlowField.Dirs)
             {
@@ -91,22 +88,28 @@ public class UnitOrderGiver : MonoBehaviour
                 if (nxt.x < minC.x || nxt.x > maxC.x || nxt.y < minC.y || nxt.y > maxC.y)
                     continue;
                 if (seen.Add(nxt))
-                    queue.Enqueue(nxt);
+                    q.Enqueue(nxt);
             }
         }
 
-        // 5) Build & assign a flow field per unit
-        int width = maxC.x - minC.x + 1;
-        int height = maxC.y - minC.y + 1;
-
+        // 6) For each mover, compute static path and hand it off:
+        int w = maxC.x - minC.x + 1, h = maxC.y - minC.y + 1;
         for (int i = 0; i < movers.Count && i < goals.Count; i++)
         {
             var unit = movers[i];
             var goal = goals[i];
 
-            var field = new FlowField(minC.x, minC.y, width, height, tilemap);
+            // build flow field over terrain only
+            var field = new FlowField(minC.x, minC.y, w, h, tilemap);
             field.Generate(goal);
-            unit.SetFlowField(field, goal);
+
+            // back-trace a static path
+            Vector3Int start3 = tilemap.WorldToCell(unit.transform.position);
+            Vector2Int start = new Vector2Int(start3.x, start3.y);
+            List<Vector2Int> path = field.GetPath(start, goal);
+
+            // assign the precomputed path
+            unit.SetPath(path);
         }
     }
 }
