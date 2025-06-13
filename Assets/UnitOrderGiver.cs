@@ -8,8 +8,11 @@ public class UnitOrderGiver : MonoBehaviour
     [Tooltip("Tilemap your units walk on (auto-found if blank)")]
     public Tilemap tilemap;
 
-    [Tooltip("BoxCollider2D on Ground defining play area (auto-found if blank)")]
+    [Tooltip("Optional BoxCollider2D on Ground defining play area")]
     public BoxCollider2D groundCollider;
+
+    [Tooltip("Optional SpriteRenderer on Ground defining play area")]
+    public SpriteRenderer groundSprite;
 
     [Tooltip("Which layers count as static obstacles")]
     public LayerMask obstacleMask;
@@ -18,22 +21,30 @@ public class UnitOrderGiver : MonoBehaviour
 
     void Awake()
     {
-        // auto-find tilemap
+        // auto-find tilemap if unset
         if (tilemap == null)
         {
             var g = GameObject.Find("Grid");
             if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
         }
 
-        // auto-find ground collider
-        if (groundCollider == null)
+        // auto-find ground collider or sprite if unset
+        if (groundCollider == null || groundSprite == null)
         {
-            var ground = GameObject.Find("Ground");
-            if (ground != null) groundCollider = ground.GetComponent<BoxCollider2D>();
+            var groundGO = GameObject.Find("Ground");
+            if (groundGO != null)
+            {
+                if (groundCollider == null)
+                    groundCollider = groundGO.GetComponent<BoxCollider2D>();
+                if (groundSprite == null)
+                    groundSprite = groundGO.GetComponent<SpriteRenderer>();
+            }
         }
 
-        if (tilemap == null) Debug.LogError("[OrderGiver] Missing Tilemap!");
-        if (groundCollider == null) Debug.LogError("[OrderGiver] Missing Ground Collider!");
+        if (tilemap == null)
+            Debug.LogError("[OrderGiver] Missing Tilemap!");
+        if (groundCollider == null && groundSprite == null)
+            Debug.LogError("[OrderGiver] Missing Ground Collider *and* SpriteRenderer!");
     }
 
     void Update()
@@ -48,9 +59,9 @@ public class UnitOrderGiver : MonoBehaviour
 
     void IssueMoveOrder(Vector3 worldDest)
     {
-        if (tilemap == null || groundCollider == null) return;
+        if (tilemap == null) return;
 
-        // 1) Gather selected units
+        // 1) selected units only
         var sels = UnitSelector.GetSelectedUnits();
         if (sels.Count == 0) return;
 
@@ -60,27 +71,32 @@ public class UnitOrderGiver : MonoBehaviour
                 movers.Add(mv);
         if (movers.Count == 0) return;
 
-        // 2) Compute ground bounds inset half-cell
-        Bounds gb = groundCollider.bounds;
+        // 2) Determine play-area bounds from collider or sprite
+        Bounds gb;
+        if (groundCollider != null)
+            gb = groundCollider.bounds;
+        else
+            gb = groundSprite.bounds;
+
         Vector3 half = tilemap.cellSize * 0.5f;
         Vector3 worldMin = gb.min + half;
         Vector3 worldMax = gb.max - half;
+
         Vector3Int minCell = tilemap.WorldToCell(worldMin);
         Vector3Int maxCell = tilemap.WorldToCell(worldMax);
 
-        int originX = minCell.x;
-        int originY = minCell.y;
-        int width = maxCell.x - minCell.x + 1;
-        int height = maxCell.y - minCell.y + 1;
+        int ox = minCell.x, oy = minCell.y;
+        int w = maxCell.x - minCell.x + 1;
+        int h = maxCell.y - minCell.y + 1;
 
-        // 3) Clamp click inside ground
-        Vector3Int clickC = tilemap.WorldToCell(worldDest);
+        // 3) Clamp the click inside those bounds
+        Vector3Int click = tilemap.WorldToCell(worldDest);
         var baseGoal = new Vector2Int(
-            Mathf.Clamp(clickC.x, minCell.x, maxCell.x),
-            Mathf.Clamp(clickC.y, minCell.y, maxCell.y)
+            Mathf.Clamp(click.x, minCell.x, maxCell.x),
+            Mathf.Clamp(click.y, minCell.y, maxCell.y)
         );
 
-        // 4) BFS outward to pick distinct free goal cells
+        // 4) BFS outwards to pick distinct free cells
         var goals = new List<Vector2Int>();
         var seen = new HashSet<Vector2Int> { baseGoal };
         var q = new Queue<Vector2Int>();
@@ -91,7 +107,6 @@ public class UnitOrderGiver : MonoBehaviour
             var cur = q.Dequeue();
             Vector3 ctr = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
 
-            // skip if static obstacle
             if (Physics2D.OverlapBox(ctr, tilemap.cellSize * 0.9f, 0f, obstacleMask) == null)
                 goals.Add(cur);
 
@@ -99,21 +114,19 @@ public class UnitOrderGiver : MonoBehaviour
             {
                 var nxt = cur + d;
                 if (nxt.x < minCell.x || nxt.x > maxCell.x ||
-                    nxt.y < minCell.y || nxt.y > maxCell.y)
-                    continue;
+                    nxt.y < minCell.y || nxt.y > maxCell.y) continue;
                 if (seen.Add(nxt)) q.Enqueue(nxt);
             }
         }
 
-        // 5) Build & hand off each flow field
+        // 5) Build & hand off each FlowField
         for (int i = 0; i < movers.Count && i < goals.Count; i++)
         {
             var unit = movers[i];
             var goal = goals[i];
 
             var field = new FlowField(
-                originX, originY,
-                width, height,
+                ox, oy, w, h,
                 tilemap,
                 obstacleMask
             );
