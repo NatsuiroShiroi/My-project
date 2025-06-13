@@ -13,15 +13,14 @@ public class FlowField
     private readonly LayerMask obstacleMask;
 
     public static readonly Vector2Int[] Dirs = {
-        new Vector2Int(1,0),  new Vector2Int(-1,0),
-        new Vector2Int(0,1),  new Vector2Int(0,-1),
-        new Vector2Int(1,1),  new Vector2Int(1,-1),
+        new Vector2Int(1,0), new Vector2Int(-1,0),
+        new Vector2Int(0,1), new Vector2Int(0,-1),
+        new Vector2Int(1,1), new Vector2Int(1,-1),
         new Vector2Int(-1,1), new Vector2Int(-1,-1)
     };
     private static readonly float[] DirCost = {
         1f,1f,1f,1f,
-        Mathf.Sqrt(2f),Mathf.Sqrt(2f),
-        Mathf.Sqrt(2f),Mathf.Sqrt(2f)
+        1.4142f,1.4142f,1.4142f,1.4142f
     };
 
     public FlowField(int originX, int originY, int width, int height, Tilemap tilemap, LayerMask obstacleMask)
@@ -53,6 +52,7 @@ public class FlowField
         {
             var cur = pq.Dequeue();
             float cc = cost[cur.x, cur.y];
+
             for (int i = 0; i < Dirs.Length; i++)
             {
                 var d = Dirs[i];
@@ -60,8 +60,10 @@ public class FlowField
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
                 var world = tilemap.GetCellCenterWorld(new Vector3Int(nx + originX, ny + originY, 0));
-                if (Physics2D.OverlapBox(world, tilemap.cellSize * 0.9f, 0f, obstacleMask) != null) continue;
+                if (Physics2D.OverlapBox(world, tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
+                    continue;
 
+                // no corner‐cut
                 if (d.x != 0 && d.y != 0)
                 {
                     var o1 = new Vector3Int(cur.x + d.x + originX, cur.y + originY, 0);
@@ -80,11 +82,12 @@ public class FlowField
             }
         }
 
+        // build flow directions
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
                 float best = cost[x, y];
-                Vector2 bd = Vector2.zero;
+                Vector2 bestDir = Vector2.zero;
                 foreach (var d in Dirs)
                 {
                     int nx = x + d.x, ny = y + d.y;
@@ -92,10 +95,10 @@ public class FlowField
                     if (cost[nx, ny] < best)
                     {
                         best = cost[nx, ny];
-                        bd = d;
+                        bestDir = d;
                     }
                 }
-                flowDir[x, y] = bd.normalized;
+                flowDir[x, y] = bestDir.normalized;
             }
     }
 
