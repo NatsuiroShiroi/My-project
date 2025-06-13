@@ -12,82 +12,69 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tilemap for cell↔world conversions (auto-find if blank)")]
     public Tilemap tilemap;
 
-    [Header("Separation (units avoid each other)")]
-    [Tooltip("Radius (world units) to look for other units")]
-    public float SeparationRadius = 0.6f;
+    // shared occupancy: which cells are taken
+    private static readonly HashSet<Vector2Int> occupied = new HashSet<Vector2Int>();
 
-    [Range(0f, 1f), Tooltip("Blend weight for separation steering")]
-    public float SeparationWeight = 0.3f;
-
-    private FlowField flow;
-    private bool isMoving;
+    // this unit’s path and index
+    private List<Vector2Int> path;
+    private int pathIndex;
 
     void Awake()
     {
-        // no Rigidbody needed anymore
-        // just find the tilemap once
         if (tilemap == null)
         {
             var g = GameObject.Find("Grid");
             if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
-            if (tilemap == null)
-                Debug.LogError($"[UnitMover:{name}] No Grid→Tilemap found!");
+            if (tilemap == null) Debug.LogError($"[UnitMover:{name}] No Grid→Tilemap found!");
         }
     }
 
-    /// <summary>
-    /// Called by UnitOrderGiver once, after Generate(goal).
-    /// </summary>
-    public void SetFlowField(FlowField ff)
+    /// <summary>Assigns a discrete center‐to‐center path.</summary>
+    public void SetPath(List<Vector2Int> newPath)
     {
-        flow = ff;
-        isMoving = (ff != null);
+        // free previous reservation
+        if (path != null && pathIndex > 0 && pathIndex - 1 < path.Count)
+            occupied.Remove(path[pathIndex - 1]);
+
+        path = newPath;
+        pathIndex = 1;
+
+        if (path != null && path.Count > 0)
+        {
+            // snap to start cell and reserve it
+            var start = path[0];
+            transform.position = tilemap.GetCellCenterWorld(
+                new Vector3Int(start.x, start.y, 0));
+            occupied.Add(start);
+        }
     }
 
     void Update()
     {
-        if (!isMoving || flow == null) return;
+        if (path == null || pathIndex >= path.Count) return;
 
-        // 1) Sample current cell based on floating position
-        Vector3 worldPos = transform.position;
-        Vector3Int cell3 = tilemap.WorldToCell(worldPos);
-        var cell = new Vector2Int(cell3.x, cell3.y);
+        var targetCell = path[pathIndex];
+        // block if occupied
+        if (occupied.Contains(targetCell)) return;
 
-        // 2) Get the flow-vector for this cell
-        Vector2 dir = flow.GetDirection(cell);
-        if (dir == Vector2.zero)
+        var targetPos = tilemap.GetCellCenterWorld(
+            new Vector3Int(targetCell.x, targetCell.y, 0));
+
+        // move smoothly
+        transform.position = Vector3.MoveTowards(
+            transform.position,
+            targetPos,
+            MoveSpeed * Time.deltaTime);
+
+        // arrived?
+        if (Vector3.Distance(transform.position, targetPos) < 0.01f)
         {
-            // we've arrived (or no path)
-            isMoving = false;
-            return;
+            // free old cell
+            var prev = path[pathIndex - 1];
+            occupied.Remove(prev);
+            // claim new
+            occupied.Add(targetCell);
+            pathIndex++;
         }
-
-        // 3) Separation steering
-        Vector2 sep = Vector2.zero;
-        int count = 0;
-        var hits = Physics2D.OverlapCircleAll(worldPos, SeparationRadius);
-        foreach (var hit in hits)
-        {
-            if (hit.TryGetComponent<UnitMover>(out var other) && other != this)
-            {
-                Vector2 diff = (Vector2)worldPos - (Vector2)other.transform.position;
-                float d = diff.magnitude;
-                if (d > 0f && d < SeparationRadius)
-                {
-                    sep += diff.normalized * ((SeparationRadius - d) / SeparationRadius);
-                    count++;
-                }
-            }
-        }
-        if (count > 0)
-        {
-            sep /= count;
-            sep = sep.normalized;
-        }
-
-        // 4) Blend and move
-        Vector2 desired = (dir * (1f - SeparationWeight) + sep * SeparationWeight).normalized;
-        Vector3 delta = (Vector3)desired * MoveSpeed * Time.deltaTime;
-        transform.position += delta;
     }
 }
