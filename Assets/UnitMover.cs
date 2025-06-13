@@ -23,42 +23,55 @@ public class UnitMover : MonoBehaviour
 
     void Awake()
     {
-        rb = gameObject.AddComponent<Rigidbody2D>();
+        // 1) Get or add our Rigidbody2D safely
+        rb = GetComponent<Rigidbody2D>();
+        if (rb == null)
+            rb = gameObject.AddComponent<Rigidbody2D>();
         rb.bodyType = RigidbodyType2D.Kinematic;
         rb.gravityScale = 0f;
         rb.freezeRotation = true;
-
-        if (tilemap == null)
-            tilemap = Object.FindFirstObjectByType<Tilemap>();
-        if (tilemap == null)
-            Debug.LogError($"[UnitMover:{name}] No Tilemap found!");
     }
 
+    void Start()
+    {
+        // 2) Find the Tilemap once all Awake calls have run
+        if (tilemap == null)
+        {
+            var grid = GameObject.Find("Grid");
+            if (grid != null)
+                tilemap = grid.GetComponentInChildren<Tilemap>();
+        }
+        if (tilemap == null)
+            Debug.LogError($"[UnitMover:{name}] No Tilemap found in scene!");
+    }
+
+    /// <summary>Called by the OrderGiver once, when you hand off a fresh flow field.</summary>
     public void SetFlowField(FlowField ff)
     {
         flow = ff;
-        isMoving = ff != null;
+        isMoving = (ff != null);
     }
 
     void FixedUpdate()
     {
         if (!isMoving || flow == null) return;
 
-        // Determine current grid cell
+        // 3) Determine current cell from our world position
         Vector3 pos3 = transform.position;
         Vector3Int c3 = tilemap.WorldToCell(pos3);
         var cell = new Vector2Int(c3.x, c3.y);
 
-        // Get static flow direction
+        // 4) Sample the static flow direction
         Vector2 dir = flow.GetDirection(cell);
         if (dir == Vector2.zero)
         {
+            // arrived or no path
             isMoving = false;
             rb.linearVelocity = Vector2.zero;
             return;
         }
 
-        // Compute separation steering
+        // 5) Build a small separation steer
         Vector2 sep = Vector2.zero;
         int cnt = 0;
         var hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
@@ -69,7 +82,7 @@ public class UnitMover : MonoBehaviour
             {
                 Vector2 d = rb.position - hit.attachedRigidbody.position;
                 float dist = d.magnitude;
-                if (dist > 0 && dist < SeparationRadius)
+                if (dist > 0f && dist < SeparationRadius)
                 {
                     sep += d.normalized * ((SeparationRadius - dist) / SeparationRadius);
                     cnt++;
@@ -82,10 +95,8 @@ public class UnitMover : MonoBehaviour
             sep = sep.normalized;
         }
 
-        // Blend flow and separation into final heading
+        // 6) Blend flow + separation → final velocity
         Vector2 desired = (dir * (1 - SeparationWeight) + sep * SeparationWeight).normalized;
-
-        // Drive via linearVelocity (new API)
         rb.linearVelocity = desired * MoveSpeed;
     }
 }
