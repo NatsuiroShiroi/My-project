@@ -23,7 +23,8 @@ public class FlowField
         1.4142f,1.4142f,1.4142f,1.4142f
     };
 
-    public FlowField(int originX, int originY, int width, int height, Tilemap tilemap, LayerMask obstacleMask)
+    public FlowField(int originX, int originY, int width, int height,
+                     Tilemap tilemap, LayerMask obstacleMask)
     {
         this.originX = originX;
         this.originY = originY;
@@ -52,27 +53,26 @@ public class FlowField
         {
             var cur = pq.Dequeue();
             float cc = cost[cur.x, cur.y];
-
             for (int i = 0; i < Dirs.Length; i++)
             {
                 var d = Dirs[i];
                 int nx = cur.x + d.x, ny = cur.y + d.y;
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
-                var world = tilemap.GetCellCenterWorld(new Vector3Int(nx + originX, ny + originY, 0));
+                var world = tilemap.GetCellCenterWorld(
+                    new Vector3Int(nx + originX, ny + originY, 0));
+                // static obstacle?
                 if (Physics2D.OverlapBox(world, tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
                     continue;
-
-                // no corner‐cut
+                // no corner-cut
                 if (d.x != 0 && d.y != 0)
                 {
                     var o1 = new Vector3Int(cur.x + d.x + originX, cur.y + originY, 0);
                     var o2 = new Vector3Int(cur.x + originX, cur.y + d.y + originY, 0);
-                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o1), tilemap.cellSize * 0.9f, 0f, obstacleMask) != null ||
-                        Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o2), tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
+                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o1), tilemap.cellSize * 0.9f, 0f, obstacleMask) != null
+                     || Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o2), tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
                         continue;
                 }
-
                 float nc = cc + DirCost[i];
                 if (nc < cost[nx, ny])
                 {
@@ -82,12 +82,11 @@ public class FlowField
             }
         }
 
-        // build flow directions
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
                 float best = cost[x, y];
-                Vector2 bestDir = Vector2.zero;
+                Vector2 bd = Vector2.zero;
                 foreach (var d in Dirs)
                 {
                     int nx = x + d.x, ny = y + d.y;
@@ -95,17 +94,44 @@ public class FlowField
                     if (cost[nx, ny] < best)
                     {
                         best = cost[nx, ny];
-                        bestDir = d;
+                        bd = d;
                     }
                 }
-                flowDir[x, y] = bestDir.normalized;
+                flowDir[x, y] = bd.normalized;
             }
     }
 
-    public Vector2 GetDirection(Vector2Int cell)
+    /// <summary>Backtrace a cell‐to‐cell path from start→goal.</summary>
+    public List<Vector2Int> GetPath(Vector2Int start, Vector2Int goal)
     {
-        int rx = cell.x - originX, ry = cell.y - originY;
-        if (rx < 0 || ry < 0 || rx >= width || ry >= height) return Vector2.zero;
-        return flowDir[rx, ry];
+        var path = new List<Vector2Int>();
+        if (start.x < originX || start.y < originY || start.x >= originX + width || start.y >= originY + height)
+            return path;
+        if (goal.x < originX || goal.y < originY || goal.x >= originX + width || goal.y >= originY + height)
+            return path;
+
+        var cur = start;
+        path.Add(cur);
+        while (cur != goal)
+        {
+            Vector2Int next = cur;
+            float best = cost[cur.x - originX, cur.y - originY];
+            foreach (var d in Dirs)
+            {
+                var cand = cur + d;
+                int rx = cand.x - originX, ry = cand.y - originY;
+                if (rx < 0 || ry < 0 || rx >= width || ry >= height) continue;
+                float cVal = cost[rx, ry];
+                if (cVal < best)
+                {
+                    best = cVal;
+                    next = cand;
+                }
+            }
+            if (next == cur) break;
+            cur = next;
+            path.Add(cur);
+        }
+        return path;
     }
 }
