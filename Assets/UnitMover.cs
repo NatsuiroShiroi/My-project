@@ -1,5 +1,4 @@
 ﻿// Assets/UnitMover.cs
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -9,78 +8,49 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tiles per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Tilemap for world↔cell conversions")]
+    [Tooltip("Tilemap for cell↔world conversions (auto-found if blank)")]
     public Tilemap tilemap;
 
-    // The path (in grid cells) this unit will follow
-    private List<Vector2Int> path;
-    private int pathIndex;
+    // The shared flow field for this move order
+    private FlowField flow;
+    private bool isMoving;
 
-    // Global occupancy: which grid cells are taken by moving units
-    private static readonly HashSet<Vector2Int> occupied = new HashSet<Vector2Int>();
-
-    // The cell this unit currently “owns”
-    private Vector2Int currentCell;
+    void Awake()
+    {
+        if (tilemap == null)
+            tilemap = FindObjectOfType<Tilemap>();
+    }
 
     /// <summary>
-    /// Assigns a precomputed path (from FlowField.GetPath) for this unit.
-    /// Reserves the start cell in the occupancy set.
+    /// Called once by UnitOrderGiver after FlowField.Generate(goal).
     /// </summary>
-    public void SetPath(List<Vector2Int> newPath)
+    public void SetFlowField(FlowField ff)
     {
-        // free old reservation
-        if (path != null && pathIndex > 0 && pathIndex <= path.Count)
-            occupied.Remove(path[pathIndex - 1]);
-
-        path = newPath;
-        pathIndex = 1;
-
-        if (path != null && path.Count >= 2)
-        {
-            // snap to start cell and reserve it
-            currentCell = path[0];
-            Vector3 world = tilemap.GetCellCenterWorld(
-                new Vector3Int(currentCell.x, currentCell.y, 0));
-            transform.position = world;
-            occupied.Add(currentCell);
-        }
-        else
-        {
-            path = null;
-        }
+        flow = ff;
+        isMoving = (flow != null);
     }
 
     void Update()
     {
-        if (path == null || pathIndex >= path.Count) return;
+        if (!isMoving || flow == null) return;
 
-        // Next grid‐cell we want to move into
-        Vector2Int nextCell = path[pathIndex];
+        // 1) Determine our current cell
+        Vector3 pos = transform.position;
+        var cell3 = tilemap.WorldToCell(pos);
+        var cell = new Vector2Int(cell3.x, cell3.y);
 
-        // Block if someone else is already there
-        if (occupied.Contains(nextCell)) return;
+        // 2) Get the flow‐vector for that cell
+        Vector2 dir = flow.GetDirection(cell);
 
-        // World position of that cell
-        Vector3 targetWorld = tilemap.GetCellCenterWorld(
-            new Vector3Int(nextCell.x, nextCell.y, 0));
-
-        // Move smoothly toward its center
-        transform.position = Vector3.MoveTowards(
-            transform.position,
-            targetWorld,
-            MoveSpeed * Time.deltaTime);
-
-        // When we’ve essentially arrived, snap in and advance
-        if (Vector3.Distance(transform.position, targetWorld) < 0.01f)
+        // 3) If zero, we’ve arrived (or can’t reach)
+        if (dir == Vector2.zero)
         {
-            // free our old cell
-            occupied.Remove(currentCell);
-
-            // claim the new one
-            currentCell = nextCell;
-            occupied.Add(currentCell);
-
-            pathIndex++;
+            isMoving = false;
+            return;
         }
+
+        // 4) Step smoothly along that vector
+        Vector3 delta = (Vector3)dir * MoveSpeed * Time.deltaTime;
+        transform.position += delta;
     }
 }
