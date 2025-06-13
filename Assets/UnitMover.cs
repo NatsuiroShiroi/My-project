@@ -44,20 +44,23 @@ public class UnitMover : MonoBehaviour
     {
         if (!isMoving || flow == null) return;
 
+        // Determine current grid cell
         Vector3 pos3 = transform.position;
         Vector3Int c3 = tilemap.WorldToCell(pos3);
         var cell = new Vector2Int(c3.x, c3.y);
 
+        // Get static flow direction
         Vector2 dir = flow.GetDirection(cell);
         if (dir == Vector2.zero)
         {
             isMoving = false;
-            rb.velocity = Vector2.zero;
+            rb.linearVelocity = Vector2.zero;
             return;
         }
 
-        // separation steering
-        Vector2 sep = Vector2.zero; int cnt = 0;
+        // Compute separation steering
+        Vector2 sep = Vector2.zero;
+        int cnt = 0;
         var hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
         foreach (var hit in hits)
         {
@@ -73,9 +76,16 @@ public class UnitMover : MonoBehaviour
                 }
             }
         }
-        if (cnt > 0) { sep /= cnt; sep = sep.normalized; }
+        if (cnt > 0)
+        {
+            sep /= cnt;
+            sep = sep.normalized;
+        }
 
+        // Blend flow and separation into final heading
         Vector2 desired = (dir * (1 - SeparationWeight) + sep * SeparationWeight).normalized;
-        rb.velocity = desired * MoveSpeed;
+
+        // Drive via linearVelocity (new API)
+        rb.linearVelocity = desired * MoveSpeed;
     }
 }
