@@ -8,49 +8,42 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Tiles per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Tilemap for cell↔world conversions (auto-found if blank)")]
+    [Tooltip("Tilemap for world↔cell conversions (auto-found)")]
     public Tilemap tilemap;
 
-    // The shared flow field for this move order
     private FlowField flow;
     private bool isMoving;
 
     void Awake()
     {
         if (tilemap == null)
-            tilemap = FindAnyObjectByType<Tilemap>();
+            tilemap = FindObjectOfType<Tilemap>();
     }
 
-    /// <summary>
-    /// Called once by UnitOrderGiver after FlowField.Generate(goal).
-    /// </summary>
     public void SetFlowField(FlowField ff)
     {
         flow = ff;
-        isMoving = (flow != null);
+        isMoving = (ff != null);
     }
 
     void Update()
     {
         if (!isMoving || flow == null) return;
 
-        // 1) Determine our current cell
-        Vector3 pos = transform.position;
-        var cell3 = tilemap.WorldToCell(pos);
-        var cell = new Vector2Int(cell3.x, cell3.y);
+        // current cell
+        var pos = transform.position;
+        var c3 = tilemap.WorldToCell(pos);
+        var cell = new Vector2Int(c3.x, c3.y);
 
-        // 2) Get the flow‐vector for that cell
+        // flow dir
         Vector2 dir = flow.GetDirection(cell);
-
-        // 3) If zero, we’ve arrived (or can’t reach)
         if (dir == Vector2.zero)
         {
             isMoving = false;
             return;
         }
 
-        // 4) Step smoothly along that vector
-        Vector3 delta = (Vector3)dir * MoveSpeed * Time.deltaTime;
-        transform.position += delta;
+        // step
+        transform.position += (Vector3)dir * MoveSpeed * Time.deltaTime;
     }
 }
