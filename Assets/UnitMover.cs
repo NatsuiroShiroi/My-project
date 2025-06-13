@@ -29,26 +29,25 @@ public class UnitMover : MonoBehaviour
         rb.freezeRotation = true;
 
         if (tilemap == null)
-            tilemap = FindObjectOfType<Tilemap>();
+            tilemap = Object.FindFirstObjectByType<Tilemap>();
+        if (tilemap == null)
+            Debug.LogError($"[UnitMover:{name}] No Tilemap found!");
     }
 
     public void SetFlowField(FlowField ff)
     {
         flow = ff;
-        isMoving = (flow != null);
+        isMoving = ff != null;
     }
 
     void FixedUpdate()
     {
-        if (!isMoving || flow == null)
-            return;
+        if (!isMoving || flow == null) return;
 
-        // current pos → cell
-        Vector3 pos = transform.position;
-        var c3 = tilemap.WorldToCell(pos);
+        Vector3 pos3 = transform.position;
+        Vector3Int c3 = tilemap.WorldToCell(pos3);
         var cell = new Vector2Int(c3.x, c3.y);
 
-        // static flow direction
         Vector2 dir = flow.GetDirection(cell);
         if (dir == Vector2.zero)
         {
@@ -57,13 +56,13 @@ public class UnitMover : MonoBehaviour
             return;
         }
 
-        // separation
+        // separation steering
         Vector2 sep = Vector2.zero; int cnt = 0;
         var hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
         foreach (var hit in hits)
         {
             if (hit.attachedRigidbody == rb) continue;
-            if (hit.TryGetComponent<UnitMover>(out var _))
+            if (hit.TryGetComponent<UnitMover>(out _))
             {
                 Vector2 d = rb.position - hit.attachedRigidbody.position;
                 float dist = d.magnitude;
@@ -76,7 +75,6 @@ public class UnitMover : MonoBehaviour
         }
         if (cnt > 0) { sep /= cnt; sep = sep.normalized; }
 
-        // blend and drive velocity
         Vector2 desired = (dir * (1 - SeparationWeight) + sep * SeparationWeight).normalized;
         rb.velocity = desired * MoveSpeed;
     }
