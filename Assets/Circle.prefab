@@ -14,7 +14,7 @@ GameObject:
   - component: {fileID: 7479818273096024414}
   - component: {fileID: 8718331733883269811}
   - component: {fileID: 1502308925307283755}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Circle
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -178,8 +178,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   MoveSpeed: 3
   tilemap: {fileID: 4340896486133555350, guid: bdb85bfad53fb13468afeb5d8b4aa6dc, type: 3}
-  SeparationRadius: 0.75
-  SeparationWeight: 0.2
 --- !u!114 &1502308925307283755
 MonoBehaviour:
   m_ObjectHideFlags: 0
