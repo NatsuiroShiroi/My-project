@@ -13,15 +13,16 @@ public class UnitMover : MonoBehaviour
     public Tilemap tilemap;
 
     [Header("Separation (units avoid each other)")]
-    [Tooltip("How far to look for nearby units")]
-    public float SeparationRadius = 0.6f;
-    [Range(0f, 1f), Tooltip("0 = no separation, 1 = full separation")]
+    [Tooltip("Radius (in world units) to look for other units")]
+    public float SeparationRadius = 0.75f;
+
+    [Range(0f, 1f), Tooltip("0 = zero separation, 1 = full separation")]
     public float SeparationWeight = 0.2f;
 
-    private Rigidbody2D rb;
-    private List<Vector2Int> path;
-    private int pathIndex;
-    private bool isMoving = false;
+    Rigidbody2D rb;
+    List<Vector2Int> path;
+    int pathIndex;
+    bool isMoving = false;
 
     void Awake()
     {
@@ -33,18 +34,18 @@ public class UnitMover : MonoBehaviour
                 tilemap = g.GetComponentInChildren<Tilemap>();
         }
         if (tilemap == null)
-            Debug.LogError($"[UnitMover:{name}] Tilemap not assigned!");
+            Debug.LogError($"[UnitMover:{name}] no Tilemap assigned!");
     }
 
     /// <summary>
-    /// Give this unit a precomputed, cell-to-cell path.
+    /// Give the unit a precomputed, cell‐to‐cell path.
     /// </summary>
     public void SetPath(List<Vector2Int> newPath)
     {
         path = newPath;
         if (path != null && path.Count >= 2)
         {
-            pathIndex = 1;  // start heading toward the second cell
+            pathIndex = 1;  // move toward path[1]
             isMoving = true;
         }
         else
@@ -55,31 +56,29 @@ public class UnitMover : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (!isMoving || tilemap == null || path == null)
+        if (!isMoving || path == null || tilemap == null)
             return;
 
-        // If we've reached the last waypoint, snap & stop
+        // Snap to final cell & stop
         if (pathIndex >= path.Count)
         {
-            var endCell = path[path.Count - 1];
-            Vector3 worldEnd = tilemap.GetCellCenterWorld(
-                new Vector3Int(endCell.x, endCell.y, 0));
-            rb.MovePosition((Vector2)worldEnd);
+            var end = path[path.Count - 1];
+            Vector3 w = tilemap.GetCellCenterWorld(new Vector3Int(end.x, end.y, 0));
+            rb.MovePosition((Vector2)w);
             isMoving = false;
             return;
         }
 
-        // Compute world-space target for this waypoint
-        Vector2Int cell = path[pathIndex];
-        Vector3 target3 = tilemap.GetCellCenterWorld(
-            new Vector3Int(cell.x, cell.y, 0));
-        Vector2 target2 = (Vector2)target3;
+        // Compute target world‐position
+        var cell = path[pathIndex];
+        Vector3 wPos3 = tilemap.GetCellCenterWorld(new Vector3Int(cell.x, cell.y, 0));
+        Vector2 wPos2 = wPos3;
 
-        // Vector toward the target
-        Vector2 toTarget = target2 - rb.position;
+        // Vector toward that point
+        Vector2 toTarget = (wPos2 - rb.position);
         float step = MoveSpeed * Time.fixedDeltaTime;
 
-        // Compute separation vector from nearby units
+        // --- SEPARATION STEERING ---
         Vector2 sep = Vector2.zero;
         int count = 0;
         var hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
@@ -87,13 +86,12 @@ public class UnitMover : MonoBehaviour
         {
             if (hit.attachedRigidbody != null && hit.attachedRigidbody != rb)
             {
-                if (hit.TryGetComponent<UnitMover>(out var _))
+                if (hit.attachedRigidbody.TryGetComponent<UnitMover>(out var _))
                 {
                     Vector2 diff = rb.position - hit.attachedRigidbody.position;
                     float dist = diff.magnitude;
                     if (dist > 0f && dist < SeparationRadius)
                     {
-                        // Weighted by closeness
                         sep += diff.normalized * ((SeparationRadius - dist) / SeparationRadius);
                         count++;
                     }
@@ -107,13 +105,13 @@ public class UnitMover : MonoBehaviour
         }
 
         // Blend heading and separation
-        Vector2 heading = toTarget.normalized;
-        Vector2 desired = (heading * (1f - SeparationWeight) + sep * SeparationWeight).normalized;
+        Vector2 head = toTarget.normalized;
+        Vector2 desired = (head * (1 - SeparationWeight) + sep * SeparationWeight).normalized;
 
-        // Move: if close enough, snap to cell and advance
+        // Move & advance waypoint when close enough
         if (toTarget.magnitude <= step)
         {
-            rb.MovePosition(target2);
+            rb.MovePosition(wPos2);
             pathIndex++;
         }
         else
