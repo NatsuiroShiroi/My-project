@@ -5,13 +5,11 @@ using UnityEngine.Tilemaps;
 
 public class UnitOrderGiver : MonoBehaviour
 {
-    [Tooltip("Tilemap your units walk on")]
+    [Tooltip("Tilemap units walk on")]
     public Tilemap tilemap;
 
     [Tooltip("Which layers count as static obstacles")]
     public LayerMask obstacleMask;
-
-    static readonly Vector2Int[] Neighbors = FlowField.Dirs;
 
     void Awake()
     {
@@ -19,7 +17,7 @@ public class UnitOrderGiver : MonoBehaviour
         {
             var g = GameObject.Find("Grid");
             if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
-            if (tilemap == null) Debug.LogError("[OrderGiver] No Grid→Tilemap found!");
+            if (tilemap == null) Debug.LogError("[OrderGiver] No Grid→Tilemap!");
         }
     }
 
@@ -28,7 +26,7 @@ public class UnitOrderGiver : MonoBehaviour
         if (Input.GetMouseButtonDown(1))
         {
             var wp = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-            wp.z = 0;
+            wp.z = 0f;
             IssueMoveOrder(wp);
         }
     }
@@ -46,20 +44,20 @@ public class UnitOrderGiver : MonoBehaviour
                 movers.Add(mv);
         if (movers.Count == 0) return;
 
-        // use Ground sprite bounds for area
-        var ground = GameObject.Find("Ground")?.GetComponent<SpriteRenderer>();
-        if (ground == null) { Debug.LogError("[OrderGiver] No Ground SpriteRenderer!"); return; }
-        Bounds gb = ground.bounds;
+        // bounds from Ground sprite
+        var groundSR = GameObject.Find("Ground")?.GetComponent<SpriteRenderer>();
+        if (groundSR == null) { Debug.LogError("[OrderGiver] No Ground SpriteRenderer!"); return; }
+        Bounds gb = groundSR.bounds;
         Vector3 half = tilemap.cellSize * 0.5f;
-        Vector3 mn = gb.min + half, mx = gb.max - half;
-
+        var mn = gb.min + half;
+        var mx = gb.max - half;
         var minC = tilemap.WorldToCell(mn);
         var maxC = tilemap.WorldToCell(mx);
         int ox = minC.x, oy = minC.y;
         int w = maxC.x - minC.x + 1;
         int h = maxC.y - minC.y + 1;
 
-        var click = tilemap.WorldToCell(worldDest);
+        Vector3Int click = tilemap.WorldToCell(worldDest);
         var baseGoal = new Vector2Int(
             Mathf.Clamp(click.x, minC.x, maxC.x),
             Mathf.Clamp(click.y, minC.y, maxC.y)
@@ -76,7 +74,7 @@ public class UnitOrderGiver : MonoBehaviour
             var ctr = tilemap.GetCellCenterWorld(new Vector3Int(cur.x, cur.y, 0));
             if (Physics2D.OverlapBox(ctr, tilemap.cellSize * 0.9f, 0f, obstacleMask) == null)
                 goals.Add(cur);
-            foreach (var d in Neighbors)
+            foreach (var d in FlowField.Dirs)
             {
                 var nxt = cur + d;
                 if (nxt.x < minC.x || nxt.x > maxC.x || nxt.y < minC.y || nxt.y > maxC.y) continue;
@@ -86,11 +84,17 @@ public class UnitOrderGiver : MonoBehaviour
 
         for (int i = 0; i < movers.Count && i < goals.Count; i++)
         {
-            var mv = movers[i];
+            var unit = movers[i];
             var goal = goals[i];
             var field = new FlowField(ox, oy, w, h, tilemap, obstacleMask);
             field.Generate(goal);
-            mv.SetFlowField(field);
+            var path = field.GetPath(
+                new Vector2Int(
+                    tilemap.WorldToCell(unit.transform.position).x,
+                    tilemap.WorldToCell(unit.transform.position).y
+                ), goal
+            );
+            unit.SetPath(path);
         }
     }
 }
