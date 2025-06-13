@@ -8,10 +8,10 @@ public class UnitMover : MonoBehaviour
     [Tooltip("Units per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Tilemap for cell↔world conversions (auto-find if blank)")]
+    [Tooltip("Tilemap for world↔cell conversions (auto-find if blank)")]
     public Tilemap tilemap;
 
-    [Tooltip("Radius to avoid other units in world units")]
+    [Tooltip("Radius (world units) to avoid other units")]
     public float SeparationRadius = 0.6f;
 
     [Range(0f, 1f), Tooltip("Blend weight for separation")]
@@ -23,10 +23,7 @@ public class UnitMover : MonoBehaviour
 
     void Awake()
     {
-        // 1) Get or add our Rigidbody2D safely
-        rb = GetComponent<Rigidbody2D>();
-        if (rb == null)
-            rb = gameObject.AddComponent<Rigidbody2D>();
+        rb = GetComponent<Rigidbody2D>() ?? gameObject.AddComponent<Rigidbody2D>();
         rb.bodyType = RigidbodyType2D.Kinematic;
         rb.gravityScale = 0f;
         rb.freezeRotation = true;
@@ -34,18 +31,15 @@ public class UnitMover : MonoBehaviour
 
     void Start()
     {
-        // 2) Find the Tilemap once all Awake calls have run
         if (tilemap == null)
         {
-            var grid = GameObject.Find("Grid");
-            if (grid != null)
-                tilemap = grid.GetComponentInChildren<Tilemap>();
+            var g = GameObject.Find("Grid");
+            if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
+            if (tilemap == null) Debug.LogError($"[UnitMover:{name}] No Grid→Tilemap found!");
         }
-        if (tilemap == null)
-            Debug.LogError($"[UnitMover:{name}] No Tilemap found in scene!");
     }
 
-    /// <summary>Called by the OrderGiver once, when you hand off a fresh flow field.</summary>
+    /// <summary>Called by OrderGiver once, after Generate(goal).</summary>
     public void SetFlowField(FlowField ff)
     {
         flow = ff;
@@ -56,31 +50,29 @@ public class UnitMover : MonoBehaviour
     {
         if (!isMoving || flow == null) return;
 
-        // 3) Determine current cell from our world position
+        // current float‐pos → cell
         Vector3 pos3 = transform.position;
         Vector3Int c3 = tilemap.WorldToCell(pos3);
         var cell = new Vector2Int(c3.x, c3.y);
 
-        // 4) Sample the static flow direction
+        // static flow vector
         Vector2 dir = flow.GetDirection(cell);
         if (dir == Vector2.zero)
         {
-            // arrived or no path
             isMoving = false;
             rb.linearVelocity = Vector2.zero;
             return;
         }
 
-        // 5) Build a small separation steer
-        Vector2 sep = Vector2.zero;
-        int cnt = 0;
+        // separation steering
+        Vector2 sep = Vector2.zero; int cnt = 0;
         var hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
         foreach (var hit in hits)
         {
             if (hit.attachedRigidbody == rb) continue;
             if (hit.TryGetComponent<UnitMover>(out _))
             {
-                Vector2 d = rb.position - hit.attachedRigidbody.position;
+                var d = rb.position - hit.attachedRigidbody.position;
                 float dist = d.magnitude;
                 if (dist > 0f && dist < SeparationRadius)
                 {
@@ -89,13 +81,9 @@ public class UnitMover : MonoBehaviour
                 }
             }
         }
-        if (cnt > 0)
-        {
-            sep /= cnt;
-            sep = sep.normalized;
-        }
+        if (cnt > 0) { sep /= cnt; sep = sep.normalized; }
 
-        // 6) Blend flow + separation → final velocity
+        // final blended heading
         Vector2 desired = (dir * (1 - SeparationWeight) + sep * SeparationWeight).normalized;
         rb.linearVelocity = desired * MoveSpeed;
     }
