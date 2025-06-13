@@ -24,8 +24,7 @@ public class FlowField
         Mathf.Sqrt(2f),Mathf.Sqrt(2f)
     };
 
-    public FlowField(int originX, int originY, int width, int height,
-                     Tilemap tilemap, LayerMask obstacleMask)
+    public FlowField(int originX, int originY, int width, int height, Tilemap tilemap, LayerMask obstacleMask)
     {
         this.originX = originX;
         this.originY = originY;
@@ -40,10 +39,8 @@ public class FlowField
     public void Generate(Vector2Int goal)
     {
         int gx = goal.x - originX, gy = goal.y - originY;
-        if (gx < 0 || gy < 0 || gx >= width || gy >= height)
-            return;
+        if (gx < 0 || gy < 0 || gx >= width || gy >= height) return;
 
-        // initialize
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 cost[x, y] = float.MaxValue;
@@ -52,36 +49,25 @@ public class FlowField
         cost[gx, gy] = 0f;
         pq.Enqueue(new Vector2Int(gx, gy), 0f);
 
-        // Dijkstra flood‐fill
         while (pq.Count > 0)
         {
             var cur = pq.Dequeue();
             float cc = cost[cur.x, cur.y];
-
             for (int i = 0; i < Dirs.Length; i++)
             {
                 var d = Dirs[i];
                 int nx = cur.x + d.x, ny = cur.y + d.y;
-                if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-                    continue;
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
-                var worldCenter = tilemap.GetCellCenterWorld(
-                    new Vector3Int(nx + originX, ny + originY, 0));
+                var world = tilemap.GetCellCenterWorld(new Vector3Int(nx + originX, ny + originY, 0));
+                if (Physics2D.OverlapBox(world, tilemap.cellSize * 0.9f, 0f, obstacleMask) != null) continue;
 
-                // 1) static‐terrain block?
-                if (Physics2D.OverlapBox(worldCenter,
-                    tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
-                    continue;
-
-                // 2) no corner‐cut
                 if (d.x != 0 && d.y != 0)
                 {
                     var o1 = new Vector3Int(cur.x + d.x + originX, cur.y + originY, 0);
                     var o2 = new Vector3Int(cur.x + originX, cur.y + d.y + originY, 0);
-                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o1),
-                        tilemap.cellSize * 0.9f, 0f, obstacleMask) != null ||
-                        Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o2),
-                        tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
+                    if (Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o1), tilemap.cellSize * 0.9f, 0f, obstacleMask) != null ||
+                        Physics2D.OverlapBox(tilemap.GetCellCenterWorld(o2), tilemap.cellSize * 0.9f, 0f, obstacleMask) != null)
                         continue;
                 }
 
@@ -94,7 +80,6 @@ public class FlowField
             }
         }
 
-        // build flow directions
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
@@ -103,8 +88,7 @@ public class FlowField
                 foreach (var d in Dirs)
                 {
                     int nx = x + d.x, ny = y + d.y;
-                    if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-                        continue;
+                    if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
                     if (cost[nx, ny] < best)
                     {
                         best = cost[nx, ny];
@@ -118,8 +102,7 @@ public class FlowField
     public Vector2 GetDirection(Vector2Int cell)
     {
         int rx = cell.x - originX, ry = cell.y - originY;
-        if (rx < 0 || ry < 0 || rx >= width || ry >= height)
-            return Vector2.zero;
+        if (rx < 0 || ry < 0 || rx >= width || ry >= height) return Vector2.zero;
         return flowDir[rx, ry];
     }
 }
