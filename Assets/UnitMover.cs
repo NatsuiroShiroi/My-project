@@ -18,7 +18,7 @@ public class UnitMover : MonoBehaviour
     void Awake()
     {
         if (tilemap == null)
-            tilemap = FindObjectOfType<Tilemap>();
+            tilemap = FindAnyObjectByType<Tilemap>();
     }
 
     /// <summary>
