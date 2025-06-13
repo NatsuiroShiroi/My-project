@@ -1,90 +1,93 @@
 ﻿// Assets/UnitMover.cs
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
 [RequireComponent(typeof(BoxCollider2D))]
 public class UnitMover : MonoBehaviour
 {
-    [Tooltip("Units per second")]
+    [Tooltip("Tiles per second")]
     public float MoveSpeed = 3f;
 
-    [Tooltip("Tilemap for world↔cell conversions (auto-find if blank)")]
+    [Tooltip("Tilemap for cell↔world conversions (auto-find if blank)")]
     public Tilemap tilemap;
 
-    [Tooltip("Radius (world units) to avoid other units")]
+    [Header("Separation (units avoid each other)")]
+    [Tooltip("Radius (world units) to look for other units")]
     public float SeparationRadius = 0.6f;
 
-    [Range(0f, 1f), Tooltip("Blend weight for separation")]
+    [Range(0f, 1f), Tooltip("Blend weight for separation steering")]
     public float SeparationWeight = 0.3f;
 
-    private Rigidbody2D rb;
     private FlowField flow;
     private bool isMoving;
 
     void Awake()
     {
-        rb = GetComponent<Rigidbody2D>() ?? gameObject.AddComponent<Rigidbody2D>();
-        rb.bodyType = RigidbodyType2D.Kinematic;
-        rb.gravityScale = 0f;
-        rb.freezeRotation = true;
-    }
-
-    void Start()
-    {
+        // no Rigidbody needed anymore
+        // just find the tilemap once
         if (tilemap == null)
         {
             var g = GameObject.Find("Grid");
             if (g != null) tilemap = g.GetComponentInChildren<Tilemap>();
-            if (tilemap == null) Debug.LogError($"[UnitMover:{name}] No Grid→Tilemap found!");
+            if (tilemap == null)
+                Debug.LogError($"[UnitMover:{name}] No Grid→Tilemap found!");
         }
     }
 
-    /// <summary>Called by OrderGiver once, after Generate(goal).</summary>
+    /// <summary>
+    /// Called by UnitOrderGiver once, after Generate(goal).
+    /// </summary>
     public void SetFlowField(FlowField ff)
     {
         flow = ff;
         isMoving = (ff != null);
     }
 
-    void FixedUpdate()
+    void Update()
     {
         if (!isMoving || flow == null) return;
 
-        // current float‐pos → cell
-        Vector3 pos3 = transform.position;
-        Vector3Int c3 = tilemap.WorldToCell(pos3);
-        var cell = new Vector2Int(c3.x, c3.y);
+        // 1) Sample current cell based on floating position
+        Vector3 worldPos = transform.position;
+        Vector3Int cell3 = tilemap.WorldToCell(worldPos);
+        var cell = new Vector2Int(cell3.x, cell3.y);
 
-        // static flow vector
+        // 2) Get the flow-vector for this cell
         Vector2 dir = flow.GetDirection(cell);
         if (dir == Vector2.zero)
         {
+            // we've arrived (or no path)
             isMoving = false;
-            rb.linearVelocity = Vector2.zero;
             return;
         }
 
-        // separation steering
-        Vector2 sep = Vector2.zero; int cnt = 0;
-        var hits = Physics2D.OverlapCircleAll(rb.position, SeparationRadius);
+        // 3) Separation steering
+        Vector2 sep = Vector2.zero;
+        int count = 0;
+        var hits = Physics2D.OverlapCircleAll(worldPos, SeparationRadius);
         foreach (var hit in hits)
         {
-            if (hit.attachedRigidbody == rb) continue;
-            if (hit.TryGetComponent<UnitMover>(out _))
+            if (hit.TryGetComponent<UnitMover>(out var other) && other != this)
             {
-                var d = rb.position - hit.attachedRigidbody.position;
-                float dist = d.magnitude;
-                if (dist > 0f && dist < SeparationRadius)
+                Vector2 diff = (Vector2)worldPos - (Vector2)other.transform.position;
+                float d = diff.magnitude;
+                if (d > 0f && d < SeparationRadius)
                 {
-                    sep += d.normalized * ((SeparationRadius - dist) / SeparationRadius);
-                    cnt++;
+                    sep += diff.normalized * ((SeparationRadius - d) / SeparationRadius);
+                    count++;
                 }
             }
         }
-        if (cnt > 0) { sep /= cnt; sep = sep.normalized; }
+        if (count > 0)
+        {
+            sep /= count;
+            sep = sep.normalized;
+        }
 
-        // final blended heading
-        Vector2 desired = (dir * (1 - SeparationWeight) + sep * SeparationWeight).normalized;
-        rb.linearVelocity = desired * MoveSpeed;
+        // 4) Blend and move
+        Vector2 desired = (dir * (1f - SeparationWeight) + sep * SeparationWeight).normalized;
+        Vector3 delta = (Vector3)desired * MoveSpeed * Time.deltaTime;
+        transform.position += delta;
     }
 }
